@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>API 配置 - 长篇小说审核</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="topbar">
+  <span class="logo">📖 长篇小说审核</span>
+  <a href="index.html">主界面</a>
+  <a href="review.html">审核确认</a>
+  <a href="config.html" class="active">API 配置</a>
+</div>
+<div class="container">
+  <div class="card">
+    <h2>OpenAI 兼容接口配置</h2>
+    <p class="muted" style="margin-bottom:14px;">
+      配置调用 API 所需的参数，保存后用于文本总结、分块与问题检测。支持任何 OpenAI 兼容的 chat/completions 接口（含代理与私有部署）。
+      API Key 仅保存在本机 <code>data/config.json</code>，不会上传到其它服务器。
+    </p>
+    <div style="margin-bottom:12px;">
+      <label style="display:block; margin-bottom:6px; font-size:14px;">Base URL（如 https://api.openai.com/v1 或代理地址）</label>
+      <input type="text" id="baseUrl" placeholder="https://api.openai.com/v1">
+    </div>
+    <div style="margin-bottom:12px;">
+      <label style="display:block; margin-bottom:6px; font-size:14px;">API Key</label>
+      <input type="password" id="apiKey" placeholder="sk-...">
+    </div>
+    <div style="margin-bottom:16px;">
+      <label style="display:block; margin-bottom:6px; font-size:14px;">模型名</label>
+      <input type="text" id="model" placeholder="gpt-4o / claude-3-5-sonnet / qwen…">
+    </div>
+    <div style="display:flex; gap:12px; align-items:center;">
+      <button class="btn" id="btnSave">保存配置</button>
+      <span id="msg" style="font-size:14px;"></span>
+    </div>
+  </div>
+</div>
+<script src="api.js"></script>
+<script>
+const baseUrlEl = document.getElementById('baseUrl');
+const apiKeyEl = document.getElementById('apiKey');
+const modelEl = document.getElementById('model');
+const msg = document.getElementById('msg');
+
+async function load() {
+  try {
+    const cfg = await fetch('/api/config').then(apijson);
+    baseUrlEl.value = cfg.baseUrl || '';
+    apiKeyEl.value = cfg.apiKey || '';
+    modelEl.value = cfg.model || '';
+  } catch (_) {}
+}
+load();
+
+document.getElementById('btnSave').addEventListener('click', async () => {
+  msg.textContent = '保存中…';
+  const body = {
+    baseUrl: baseUrlEl.value.trim(),
+    apiKey: apiKeyEl.value.trim(),
+    model: modelEl.value.trim()
+  };
+  try {
+    const r = await fetch('/api/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    }).then(apijson);
+    if (r.ok) msg.textContent = '✅ 已保存，可返回到主界面开始审核';
+    else msg.textContent = '❌ ' + (r.error || '保存失败');
+  } catch (e) {
+    msg.textContent = '❌ ' + e.message;
+  }
+});
+</script>
+</body>
+</html>

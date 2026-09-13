@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>审校确认 - 长篇小说审核</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="topbar">
+  <span class="logo">📖 长篇小说审核</span>
+  <a href="index.html">主界面</a>
+  <a href="review.html" class="active">审核确认</a>
+  <a href="config.html">API 配置</a>
+</div>
+<div class="container">
+  <div class="card">
+    <h2>逐条审校 <span class="badge" id="countBadge">0 条</span></h2>
+    <p class="muted" style="margin-bottom:10px;">
+      每条问题都给出了原句、AI 原因和建议句。你可以直接采用建议句，或在输入框中修改为自己认可的表述，然后点击「保存」。
+      保存后会在该条记录中写入 <code>userAffirm</code> 字段，并写入 suggestion.json。
+    </p>
+    <div style="margin-bottom:10px; display:flex; gap:10px; align-items:center;">
+      <input type="text" id="timeInput" placeholder="输入本次会话编号 (time)，例如 20260913_153000" style="max-width:360px;">
+      <button class="btn" id="btnLoad">加载</button>
+      <button class="btn btn-success" id="btnNewReview" style="margin-left:auto;">新的审核任务</button>
+    </div>
+    <div class="err-banner" id="err" style="display:none;"></div>
+  </div>
+
+  <div id="list"></div>
+  <div class="empty" id="empty" style="display:none;">
+    暂无问题或尚未加载。<br>输入上面的会话编号(t)后点击「加载」，或在主界面处理完成后点击「前往审核确认页」。
+  </div>
+</div>
+
+<script src="api.js"></script>
+<script>
+const timeInput = document.getElementById('timeInput');
+const btnLoad = document.getElementById('btnLoad');
+const errEl = document.getElementById('err');
+const listEl = document.getElementById('list');
+const emptyEl = document.getElementById('empty');
+const countBadge = document.getElementById('countBadge');
+
+let currentTime = '';
+
+function getTimeFromUrl() {
+  const p = new URLSearchParams(location.search);
+  return p.get('time');
+}
+
+async function load() {
+  const t = currentTime || getTimeFromUrl();
+  if (!t) { errEl.style.display = 'block'; errEl.textContent = '缺少会话编号。'; return; }
+  currentTime = t;
+  timeInput.value = t;
+  errEl.style.display = 'none';
+  listEl.innerHTML = '';
+  try {
+    const r = await fetch('/api/result?time=' + encodeURIComponent(t)).then(apijson);
+    if (r.error) throw new Error(r.error);
+    render(r.suggestions);
+  } catch (e) {
+    errEl.style.display = 'block';
+    errEl.textContent = '加载失败：' + e.message;
+  }
+}
+
+function render(suggestions) {
+  countBadge.textContent = suggestions.length + ' 条';
+  emptyEl.style.display = suggestions.length ? 'none' : 'block';
+  listEl.innerHTML = '';
+  if (!suggestions.length) return;
+
+  suggestions.forEach((s, i) => {
+    const card = document.createElement('div');
+    card.className = 'issue';
+    card.innerHTML = `
+      <div class="head">
+        <span class="muted">#${i + 1}｜第 ${s.line} 行｜块 ${s.blockIndex + 1}</span>
+        <span class="tag">${s.id}</span>
+      </div>
+      <div class="orig">原文句：${escapeHtml(s.original)}</div>
+      <div class="reason">问题原因（${escapeHtml(s.issue)}）</div>
+      <div class="sug">AI 建议：${escapeHtml(s.suggested)}</div>
+      <div class="affirm">
+        <textarea data-field="affirm" rows="2" placeholder="在此输入最终认可的表述（可修改上述建议句后填入）">${escapeHtml(s.userAffirm || '')}</textarea>
+        <button class="btn btn-mini btn-success" data-action="save">保存</button>
+        <span class="save-msg" data-el="msg" style="display:none;">已保存</span>
+      </div>
+    `;
+    const saveBtn = card.querySelector('[data-action=save]');
+    const textarea = card.querySelector('[data-field=affirm]');
+    const msg = card.querySelector('[data-el=msg]');
+    saveBtn.addEventListener('click', async () => {
+      const val = textarea.value;
+      msg.style.display = 'inline';
+      msg.textContent = '保存中…';
+      try {
+        const r = await fetch('/api/affirm', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ time: currentTime, id: s.id, userAffirm: val })
+        }).then(apijson);
+        if (!r.ok && r.error) throw new Error(r.error);
+        msg.textContent = '✅ 已保存';
+        setTimeout(() => msg.style.display = 'none', 1500);
+      } catch (e) {
+        msg.textContent = '❌ ' + e.message;
+      }
+    });
+    listEl.appendChild(card);
+  });
+}
+
+function escapeHtml(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+btnLoad.addEventListener('click', () => {
+  currentTime = timeInput.value.trim();
+  load();
+});
+btnNewReview.addEventListener('click', () => {
+  localStorage.removeItem('novelReviewCurrentTime');
+  window.location.href = 'index.html';
+});
+
+// auto load if time in url or saved
+const urlTime = getTimeFromUrl();
+if (urlTime) load();
+else {
+  const saved = localStorage.getItem('novelReviewCurrentTime');
+  if (saved) { currentTime = saved; load(); }
+}
+</script>
+</body>
+</html>

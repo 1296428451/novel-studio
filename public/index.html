@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>长篇小说审核 - 主界面</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="topbar">
+  <span class="logo">📖 长篇小说审核</span>
+  <a href="index.html" class="active">主界面</a>
+  <a href="review.html">审核确认</a>
+  <a href="config.html">API 配置</a>
+</div>
+<div class="container">
+  <div class="card">
+    <h2>输入原始文本</h2>
+    <p class="muted" style="margin-bottom:10px;">将你要审核的长篇小说内容直接粘贴进来，点击「开始审核」。系统会依次生成剧情总结、分块、逐块问题检测。</p>
+    <textarea id="input" rows="16" placeholder="在此粘贴长篇小说原文…"></textarea>
+    <div style="margin-top:12px; display:flex; gap:12px; align-items:center;">
+      <button class="btn" id="btnStart">开始审核</button>
+      <button class="btn btn-success" id="btnToReview" disabled>前往审核确认页</button>
+      <span class="muted" id="hint"></span>
+    </div>
+  </div>
+
+  <div class="card" id="progressCard" style="display:none;">
+    <h2>处理进度</h2>
+    <div class="progress" id="progress">初始化…</div>
+    <div style="margin-top:10px;">
+      <button class="btn" id="btnRetry" style="display:none;">重试（续接当前进度）</button>
+    </div>
+    <div class="card" id="summaryCard" style="display:none; margin-top:12px;">
+      <h2>剧情总结 (summary.md)</h2>
+      <pre id="summaryText" style="white-space:pre-wrap; font-size:14px; background:#fafafa; padding:12px; border-radius:8px;"></pre>
+    </div>
+  </div>
+
+  <div class="card" id="historyCard">
+    <h2>历史记录（可继续之前的处理进度）</h2>
+    <div id="histList"><span class="muted">加载中…</span></div>
+  </div>
+</div>
+
+<script src="api.js"></script>
+<script>
+const inputEl = document.getElementById('input');
+const btnStart = document.getElementById('btnStart');
+const btnToReview = document.getElementById('btnToReview');
+const hint = document.getElementById('hint');
+const progressCard = document.getElementById('progressCard');
+const progress = document.getElementById('progress');
+const summaryCard = document.getElementById('summaryCard');
+const summaryText = document.getElementById('summaryText');
+const btnRetry = document.getElementById('btnRetry');
+const histList = document.getElementById('histList');
+
+let currentTime = localStorage.getItem('novelReviewCurrentTime') || '';
+let busy = false;
+
+async function api(url, opts) {
+  return fetch(url, opts).then(apijson);
+}
+
+function setProgress(msg) { progress.textContent = msg; }
+
+async function getStatus(t) {
+  return api('/api/process/status?time=' + encodeURIComponent(t));
+}
+
+async function postStep(path, time, index) {
+  return api(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ time: time, index: index })
+  });
+}
+
+// 核心：从当前进度开始，逐阶段续接处理到完成。
+// 各 /step 接口是幂等的（已完成索引会被跳过），出错后点击【重试】会重新从 status 计算剩余部分，从而实现续接。
+async function runProcess(t) {
+  busy = true;
+  btnStart.disabled = true;
+  btnRetry.style.display = 'none';
+  progressCard.style.display = 'block';
+  try {
+    const st = await getStatus(t);
+    const chunkTotal = st.chunkTotal || 1;
+
+    // 阶段1：逐窗口总结
+    let sumDone = new Set(st.summaryDone || []);
+    for (let i = 0; i < chunkTotal; i++) {
+      if (sumDone.has(i)) continue;
+      setProgress(`1/3 剧情总结：已处理 ${sumDone.size}/${chunkTotal}`);
+      const r = await postStep('/api/process/summary/step', t, i);
+      if (!r.ok) throw new Error(r.error || 'summary 失败');
+      sumDone = new Set(r.summaryDone || []);
+    }
+    const st2 = await getStatus(t);
+    summaryText.textContent = st2.summary || '(暂无总结)';
+    summaryCard.style.display = 'block';
+
+    // 阶段2：逐窗口分块
+    let spDone = new Set(st2.splitDone || []);
+    for (let i = 0; i < chunkTotal; i++) {
+      if (spDone.has(i)) continue;
+      setProgress(`2/3 分块：已处理 ${spDone.size}/${chunkTotal}`);
+      const r = await postStep('/api/process/split/step', t, i);
+      if (!r.ok) throw new Error(r.error || 'split 失败');
+      spDone = new Set(r.splitDone || []);
+    }
+
+    // 阶段3：逐块问题检测（块数以分块结果为准）
+    const st3 = await getStatus(t);
+    const blockCount = st3.splitBlockCount || 0;
+    let evDone = new Set(st3.evaluateDone || []);
+    for (let b = 0; b < blockCount; b++) {
+      if (evDone.has(b)) continue;
+      setProgress(`3/3 逐块检测：已处理 ${evDone.size}/${blockCount}`);
+      const r = await postStep('/api/process/evaluate/step', t, b);
+      if (!r.ok) throw new Error(r.error || 'evaluate 失败');
+      evDone = new Set(r.evaluateDone || []);
+    }
+
+    const final = await getStatus(t);
+    setProgress(`✅ 完成！共检测到 ${final.evaluateCount || 0} 处可能存在的问题。可前往审核确认页逐条校订。`);
+    btnToReview.disabled = false;
+    hint.textContent = `会话编号：${t}（分块数：${chunkTotal}）`;
+  } catch (e) {
+    setProgress('❌ 出错了：' + e.message);
+    btnRetry.style.display = 'inline-block';
+    btnRetry.dataset.time = t;
+  } finally {
+    busy = false;
+    btnStart.disabled = false;
+  }
+}
+
+btnStart.addEventListener('click', async () => {
+  const text = inputEl.value.trim();
+  if (!text) { hint.textContent = '请输入文本'; return; }
+  if (busy) return;
+  btnStart.disabled = true;
+  progressCard.style.display = 'block';
+  summaryCard.style.display = 'none';
+  btnRetry.style.display = 'none';
+  try {
+    setProgress('0/3 创建会话并保存原始文本…');
+    const r = await api('/api/process/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text })
+    });
+    if (!r.ok) throw new Error(r.error || 'start 失败');
+    currentTime = r.time;
+    localStorage.setItem('novelReviewCurrentTime', currentTime);
+    await runProcess(currentTime);
+  } catch (e) {
+    setProgress('❌ 出错了：' + e.message);
+    btnRetry.style.display = 'inline-block';
+    btnRetry.dataset.time = currentTime;
+    btnStart.disabled = false;
+  }
+});
+
+btnRetry.addEventListener('click', async () => {
+  const t = btnRetry.dataset.time || currentTime;
+  if (t && !busy) await runProcess(t);
+});
+
+btnToReview.addEventListener('click', () => {
+  window.location.href = 'review.html?time=' + encodeURIComponent(currentTime);
+});
+
+function escapeHtml(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+async function loadHistory() {
+  try {
+    const list = await api('/api/history');
+    histList.innerHTML = '';
+    if (!list.length) {
+      histList.innerHTML = '<span class="muted">暂无历史记录</span>';
+      return;
+    }
+    list.forEach(h => {
+      const row = document.createElement('div');
+      row.className = 'hist-item';
+      row.style.cssText = 'display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 12px;border:1px solid #eee;border-radius:8px;margin-bottom:6px;cursor:pointer;transition:background .15s;';
+      const summaryDone = (h.summaryDoneCount === h.chunkTotal);
+      row.innerHTML = `
+        <div style="min-width:0;">
+          <div style="font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml((h.title || h.time).slice(0, 50))}</div>
+          <div class="muted" style="font-size:12px;margin-top:2px;">
+            ${h.time}｜总结 ${summaryDone ? '✓' : h.summaryDoneCount + '/' + h.chunkTotal}｜
+            分块 ${h.splitDoneCount}/${h.chunkTotal}｜检测 ${h.evaluateDoneCount} 块
+          </div>
+        </div>
+        <span class="muted" style="flex:none;">继续 →</span>`;
+      row.addEventListener('mouseenter', () => row.style.background = '#f7f7f7');
+      row.addEventListener('mouseleave', () => row.style.background = '');
+      row.addEventListener('click', () => {
+        if (busy) return;
+        currentTime = h.time;
+        localStorage.setItem('novelReviewCurrentTime', currentTime);
+        inputEl.value = '';
+        btnRetry.style.display = 'none';
+        runProcess(currentTime);
+      });
+      histList.appendChild(row);
+    });
+  } catch (_) {
+    histList.innerHTML = '<span class="muted">历史记录加载失败</span>';
+  }
+}
+
+loadHistory();
+</script>
+</body>
+</html>
