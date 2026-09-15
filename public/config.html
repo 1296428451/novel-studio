@@ -8,9 +8,10 @@
 </head>
 <body>
 <div class="topbar">
-  <span class="logo">📖 长篇小说审核</span>
-  <a href="index.html">主界面</a>
-  <a href="review.html">审核确认</a>
+  <span class="logo">📖 小说创作助手</span>
+  <a href="index.html">审校</a>
+  <a href="review.html">审校确认</a>
+  <a href="create.html">创作</a>
   <a href="config.html" class="active">API 配置</a>
 </div>
 <div class="container">
@@ -30,7 +31,18 @@
     </div>
     <div style="margin-bottom:16px;">
       <label style="display:block; margin-bottom:6px; font-size:14px;">模型名</label>
-      <input type="text" id="model" placeholder="gpt-4o / claude-3-5-sonnet / qwen…">
+      <div style="display:flex; gap:8px; align-items:center;">
+        <div style="position:relative; flex:1;">
+          <div style="display:flex; border:1px solid var(--border, #ccc); border-radius:6px; overflow:visible;">
+            <input type="text" id="model" placeholder="gpt-4o / claude-3-5-sonnet / qwen…" style="flex:1; border:none; outline:none; padding:8px 12px; font-size:14px; background:transparent;">
+            <button id="btnDropdown" style="border:none; background:transparent; padding:0 10px; cursor:pointer; font-size:12px; color:#888;" title="展开模型列表">▼</button>
+          </div>
+          <div id="modelDropdown" style="display:none; position:absolute; top:100%; left:0; right:0; z-index:50; background:#fff; border:1px solid #d0d5dd; border-radius:0 0 6px 6px; max-height:240px; overflow-y:auto; box-shadow:0 4px 12px rgba(0,0,0,.1);">
+          </div>
+        </div>
+        <button class="btn btn-mini" id="btnFetchModels" style="white-space:nowrap;">获取模型</button>
+        <span id="modelHint" class="muted" style="font-size:12px;"></span>
+      </div>
     </div>
     <div style="display:flex; gap:12px; align-items:center;">
       <button class="btn" id="btnSave">保存配置</button>
@@ -44,6 +56,9 @@ const baseUrlEl = document.getElementById('baseUrl');
 const apiKeyEl = document.getElementById('apiKey');
 const modelEl = document.getElementById('model');
 const msg = document.getElementById('msg');
+const modelDropdown = document.getElementById('modelDropdown');
+const modelHint = document.getElementById('modelHint');
+const btnDropdown = document.getElementById('btnDropdown');
 
 async function load() {
   try {
@@ -72,6 +87,56 @@ document.getElementById('btnSave').addEventListener('click', async () => {
     else msg.textContent = '❌ ' + (r.error || '保存失败');
   } catch (e) {
     msg.textContent = '❌ ' + e.message;
+  }
+});
+
+document.getElementById('btnFetchModels').addEventListener('click', async () => {
+  modelHint.textContent = '获取中…';
+  modelDropdown.style.display = 'none';
+  modelDropdown.innerHTML = '';
+  try {
+    const r = await fetch('/api/models').then(apijson);
+    if (r.error) throw new Error(r.error);
+    const models = r.models || [];
+    models.forEach(m => {
+      const item = document.createElement('div');
+      item.textContent = m;
+      item.style.cssText = 'padding:8px 12px; cursor:pointer; font-size:13px; transition:background .12s;';
+      item.addEventListener('mouseenter', () => item.style.background = '#f0f4ff');
+      item.addEventListener('mouseleave', () => item.style.background = '');
+      item.addEventListener('click', () => {
+        modelEl.value = m;
+        modelDropdown.style.display = 'none';
+      });
+      modelDropdown.appendChild(item);
+    });
+    modelHint.textContent = `共 ${models.length} 个模型可用`;
+    if (models.length === 1 && !modelEl.value) {
+      modelEl.value = models[0];
+    }
+  } catch (e) {
+    modelHint.textContent = '❌ ' + e.message;
+  }
+});
+
+btnDropdown.addEventListener('click', (e) => {
+  e.stopPropagation();
+  if (modelDropdown.children.length === 0) {
+    document.getElementById('btnFetchModels').click();
+    return;
+  }
+  modelDropdown.style.display = modelDropdown.style.display === 'block' ? 'none' : 'block';
+});
+
+modelEl.addEventListener('focus', () => {
+  if (modelDropdown.children.length > 0) {
+    modelDropdown.style.display = 'block';
+  }
+});
+
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('#model') && !e.target.closest('#btnDropdown') && !e.target.closest('#modelDropdown')) {
+    modelDropdown.style.display = 'none';
   }
 });
 </script>

@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI创作 - 小说创作助手</title>
+<link rel="stylesheet" href="style.css">
+<script src="lib/marked.min.js"></script>
+<style>
+.skill-row { display:flex; align-items:center; gap:8px; padding:6px 10px; border:1px solid #e3e6eb; border-radius:8px; margin-bottom:6px; font-size:14px; transition:border-color .15s; }
+.skill-row:hover { border-color:#3b82f6; }
+.skill-row .skill-name { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; cursor:default; }
+.skill-row input[type=checkbox] { width:auto; }
+.skill-row .btn-mini { padding:3px 10px; font-size:12px; border-radius:4px; }
+.modal-mask { display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,.35); z-index:100; align-items:center; justify-content:center; }
+.modal-mask.show { display:flex; }
+.modal-box { background:#fff; border-radius:12px; width:min(800px,94vw); max-height:85vh; display:flex; flex-direction:column; box-shadow:0 8px 30px rgba(0,0,0,.18); }
+.modal-box .modal-head { padding:14px 18px; border-bottom:1px solid #eee; display:flex; align-items:center; justify-content:space-between; }
+.modal-box .modal-head h3 { margin:0; font-size:16px; }
+.modal-box .modal-body { padding:14px 18px; flex:1; overflow-y:auto; }
+.modal-box .modal-body textarea { width:100%; min-height:320px; resize:vertical; font-family:inherit; font-size:13px; line-height:1.6; }
+.modal-box .modal-foot { padding:10px 18px; border-top:1px solid #eee; display:flex; gap:8px; justify-content:flex-end; }
+.md-content h1,.md-content h2,.md-content h3,.md-content h4 { margin:16px 0 8px; line-height:1.4; }
+.md-content h1 { font-size:1.4em; border-bottom:1px solid #e3e6eb; padding-bottom:6px; }
+.md-content h2 { font-size:1.2em; border-bottom:1px solid #e3e6eb; padding-bottom:4px; }
+.md-content h3 { font-size:1.1em; }
+.md-content p { margin:6px 0; }
+.md-content ul,.md-content ol { padding-left:24px; margin:6px 0; }
+.md-content li { margin:2px 0; }
+.md-content code { background:#e8e8e8; padding:2px 6px; border-radius:3px; font-size:0.9em; }
+.md-content pre { background:#2d2d2d; color:#f8f8f2; padding:12px 16px; border-radius:6px; overflow-x:auto; font-size:13px; line-height:1.5; }
+.md-content pre code { background:none; padding:0; color:inherit; }
+.md-content blockquote { border-left:4px solid #3b82f6; padding:6px 14px; margin:8px 0; background:#f0f4ff; color:#555; }
+.md-content table { border-collapse:collapse; width:100%; margin:8px 0; }
+.md-content th,.md-content td { border:1px solid #ddd; padding:6px 12px; text-align:left; }
+.md-content th { background:#f5f5f5; font-weight:600; }
+.md-content hr { border:none; border-top:1px solid #e3e6eb; margin:16px 0; }
+.md-content strong { font-weight:600; }
+.md-content em { font-style:italic; }
+</style>
+</head>
+<body>
+<div class="topbar">
+  <span class="logo">📖 小说创作助手</span>
+  <a href="index.html">审校</a>
+  <a href="review.html">审校确认</a>
+  <a href="create.html" class="active">创作</a>
+  <a href="config.html">API 配置</a>
+</div>
+<div class="container">
+  <div class="card">
+    <h2>AI 创作（分镜生成）</h2>
+    <p class="muted" style="margin-bottom:10px;">
+      选择你需要的 Skill 文件，输入创作需求，AI 将根据 Skill 要求帮你撰写小说分镜。
+    </p>
+
+    <div class="card" style="background:#fffbe6; border-color:#ffe58f; margin-bottom:16px;">
+      <p style="font-size:13px; color:#ad6800; margin:0;">
+        💡 <strong>注意事项：</strong>Skill 不是加载越多越好，多了容易降智，少了容易需求不足。
+        推荐选择 <strong>1-2 个 Skill</strong>，总长度不超过 2w 字。
+      </p>
+    </div>
+
+    <div style="margin-bottom:14px;">
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">
+        <label style="font-size:14px; font-weight:600;">选择 Skill（可多选）</label>
+        <span id="skillCount" class="muted" style="font-size:12px;"></span>
+      </div>
+      <div id="skillList">
+        <span class="muted">加载中…</span>
+      </div>
+      <div id="skillNoData" style="display:none; margin-top:8px;" class="muted">
+        未检测到 Skill 文件。请在 <code>skill/</code> 文件夹中放入 .txt 或 .md 格式的 Skill 文件。
+      </div>
+      <div style="display:flex; gap:10px; align-items:center; margin-top:12px; padding:10px 14px; background:#f8f9fb; border:1px dashed #d0d5dd; border-radius:8px;">
+        <label for="skillFileInput" style="cursor:pointer; padding:8px 16px; border-radius:6px; background:#fff; border:1px solid var(--border); font-size:13px; display:flex; align-items:center; gap:6px; transition:border-color .15s;" onmouseenter="this.style.borderColor='#3b82f6'" onmouseleave="this.style.borderColor='#e3e6eb'">
+          📎 选择文件
+        </label>
+        <input type="file" id="skillFileInput" accept=".txt,.md" style="display:none;">
+        <span id="skillFileName" class="muted" style="flex:1; font-size:13px;">未选择文件</span>
+        <button class="btn btn-mini" id="btnUploadSkill" style="background:var(--success);">上传</button>
+        <span class="muted" id="uploadHint" style="font-size:13px;"></span>
+      </div>
+    </div>
+
+    <div style="margin-bottom:14px;">
+      <label style="display:block; margin-bottom:6px; font-size:14px; font-weight:600;">创作需求（User Prompt）</label>
+      <textarea id="promptInput" rows="6" placeholder="直接输入你想要的创作内容即可，无需额外说明"请生成"、"请处理"等前缀。"></textarea>
+    </div>
+
+    <div style="display:flex; gap:12px; align-items:center;">
+      <button class="btn" id="btnGenerate">开始生成</button>
+      <span class="muted" id="genHint"></span>
+    </div>
+  </div>
+
+  <div class="card" id="outputCard" style="display:none;">
+    <h2>生成结果 <span class="badge" id="timeBadge"></span></h2>
+    <div id="outputContent" class="md-content" style="font-size:14px; background:#fafafa; padding:14px; border-radius:8px; line-height:1.8; max-height:600px; overflow-y:auto;"></div>
+  </div>
+
+  <div class="card" id="historyCard">
+    <h2>创作历史记录</h2>
+    <div id="createHistList"><span class="muted">加载中…</span></div>
+  </div>
+</div>
+
+<div class="modal-mask" id="editModal">
+  <div class="modal-box">
+    <div class="modal-head">
+      <h3 id="editModalTitle">编辑 Skill</h3>
+      <button class="btn btn-mini" style="background:#eee; color:#444;" id="btnEditClose">✕</button>
+    </div>
+    <div class="modal-body">
+      <textarea id="editContent"></textarea>
+    </div>
+    <div class="modal-foot">
+      <span class="muted" id="editHint" style="flex:1;"></span>
+      <button class="btn btn-mini" style="background:#eee; color:#444;" id="btnEditCancel">取消</button>
+      <button class="btn btn-mini" style="background:var(--success);" id="btnEditSave">保存</button>
+    </div>
+  </div>
+</div>
+
+<script src="api.js"></script>
+<script>
+const skillList = document.getElementById('skillList');
+const skillNoData = document.getElementById('skillNoData');
+const skillCount = document.getElementById('skillCount');
+const promptInput = document.getElementById('promptInput');
+const btnGenerate = document.getElementById('btnGenerate');
+const genHint = document.getElementById('genHint');
+const outputCard = document.getElementById('outputCard');
+const timeBadge = document.getElementById('timeBadge');
+const outputContent = document.getElementById('outputContent');
+const createHistList = document.getElementById('createHistList');
+const skillFileInput = document.getElementById('skillFileInput');
+const btnUploadSkill = document.getElementById('btnUploadSkill');
+const uploadHint = document.getElementById('uploadHint');
+const skillFileName = document.getElementById('skillFileName');
+
+let editModal = document.getElementById('editModal');
+let editModalTitle = document.getElementById('editModalTitle');
+let editContent = document.getElementById('editContent');
+let editHint = document.getElementById('editHint');
+let editingSkillName = '';
+
+let busy = false;
+let elapsedTimer = null;
+let genStartAt = 0;
+
+// 流式渲染状态
+let currentMd = '';
+let rafPending = false;
+
+// 无数据看门狗：连续 5 分钟未收到任何字节则中止请求。
+// 后端只要有增量到达就会不断重置计时，正常长文生成不会误伤。
+const NO_DATA_MS = 5 * 60 * 1000;
+
+function stopElapsedTimer() {
+  if (elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null; }
+}
+
+function startElapsedTimer(prefix) {
+  genStartAt = Date.now();
+  stopElapsedTimer();
+  const tick = () => {
+    const sec = Math.floor((Date.now() - genStartAt) / 1000);
+    const mm = String(Math.floor(sec / 60)).padStart(2, '0');
+    const ss = String(sec % 60).padStart(2, '0');
+    genHint.textContent = `${prefix}已等待 ${mm}:${ss}`;
+  };
+  tick();
+  elapsedTimer = setInterval(tick, 1000);
+}
+
+function releaseBusy() {
+  busy = false;
+  btnGenerate.disabled = false;
+  stopElapsedTimer();
+}
+
+// 流式增量到达后合并到 currentMd，用 rAF 节流渲染（避免每个 delta 都全量 parse markdown）
+function scheduleStreamRender() {
+  if (rafPending) return;
+  rafPending = true;
+  requestAnimationFrame(() => {
+    rafPending = false;
+    const nearBottom = outputContent.scrollHeight - outputContent.scrollTop - outputContent.clientHeight < 120;
+    outputContent.innerHTML = renderMarkdown(currentMd);
+    if (nearBottom) outputContent.scrollTop = outputContent.scrollHeight;
+  });
+}
+
+function escapeHtml(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function renderMarkdown(text) {
+  if (typeof marked === 'undefined') return escapeHtml(text).replace(/\n/g, '<br>');
+  marked.setOptions({ breaks: true, gfm: true });
+  return marked.parse(text || '');
+}
+
+function getCheckedSkills() {
+  const cbs = document.querySelectorAll('#skillList input[type=checkbox]:checked');
+  return Array.from(cbs).map(cb => cb.value);
+}
+
+function updateSkillCount() {
+  const checked = getCheckedSkills().length;
+  const total = document.querySelectorAll('#skillList input[type=checkbox]').length;
+  skillCount.textContent = `已选 ${checked}/${total}`;
+}
+
+async function loadSkills() {
+  try {
+    const skills = await fetch('/api/skills/list').then(apijson);
+    skillList.innerHTML = '';
+    if (!skills.length) {
+      skillNoData.style.display = 'block';
+      skillCount.textContent = '';
+      return;
+    }
+    skillNoData.style.display = 'none';
+    skills.forEach(s => {
+      const row = document.createElement('div');
+      row.className = 'skill-row';
+      const priorChecked = localStorage.getItem('skillChecked_' + s.name) === '1';
+      row.innerHTML = `
+        <input type="checkbox" value="${escapeHtml(s.name)}" style="width:auto;" ${priorChecked ? 'checked' : ''}>
+        <span class="skill-name" title="${escapeHtml(s.display)}">${escapeHtml(s.display)}</span>
+        <button class="btn btn-mini" data-action="rename" style="background:#f0fdf4; color:#16a34a; border:1px solid #bbf7d0;">重命名</button>
+        <button class="btn btn-mini" data-action="edit" style="background:#eff6ff; color:#3b82f6; border:1px solid #bfdbfe;">编辑</button>
+        <button class="btn btn-mini" data-action="delete" style="background:#fff0f0; color:#ef4444; border:1px solid #fecaca;">删除</button>`;
+      const cb = row.querySelector('input[type=checkbox]');
+      cb.addEventListener('change', () => {
+        localStorage.setItem('skillChecked_' + s.name, cb.checked ? '1' : '0');
+        updateSkillCount();
+      });
+      row.querySelector('[data-action=rename]').addEventListener('click', () => renameSkill(s.name));
+      row.querySelector('[data-action=edit]').addEventListener('click', () => openEdit(s.name));
+      row.querySelector('[data-action=delete]').addEventListener('click', () => deleteSkill(s.name));
+      skillList.appendChild(row);
+    });
+    updateSkillCount();
+  } catch (_) {
+    skillList.innerHTML = '<span class="muted">Skill 列表加载失败</span>';
+  }
+}
+
+btnUploadSkill.addEventListener('click', async () => {
+  const file = skillFileInput.files[0];
+  if (!file) { uploadHint.textContent = '请先选择一个文件'; return; }
+  uploadHint.textContent = '上传中…';
+  const formData = new FormData(); formData.append('file', file);
+  try {
+    const resp = await fetch('/api/skills/upload', { method: 'POST', body: formData });
+    const r = await apijson(resp);
+    if (r.error) throw new Error(r.error);
+    uploadHint.textContent = '✅ 已上传：' + r.name;
+    skillFileInput.value = '';
+    skillFileName.textContent = '未选择文件';
+    loadSkills();
+  } catch (e) { uploadHint.textContent = '❌ ' + e.message; }
+});
+
+skillFileInput.addEventListener('change', () => {
+  skillFileName.textContent = skillFileInput.files[0] ? skillFileInput.files[0].name : '未选择文件';
+});
+
+async function openEdit(name) {
+  try {
+    editHint.textContent = '加载中…';
+    const r = await fetch('/api/skills/read?name=' + encodeURIComponent(name)).then(apijson);
+    if (r.error) throw new Error(r.error);
+    editingSkillName = name;
+    editModalTitle.textContent = '编辑：' + name;
+    editContent.value = r.content;
+    editHint.textContent = '';
+    editModal.classList.add('show');
+  } catch (e) { alert('加载失败：' + e.message); }
+}
+
+function closeEdit() {
+  editModal.classList.remove('show');
+  editingSkillName = '';
+}
+
+document.getElementById('btnEditClose').addEventListener('click', closeEdit);
+document.getElementById('btnEditCancel').addEventListener('click', closeEdit);
+editModal.addEventListener('click', e => { if (e.target === editModal) closeEdit(); });
+
+document.getElementById('btnEditSave').addEventListener('click', async () => {
+  if (!editingSkillName) return;
+  editHint.textContent = '保存中…';
+  try {
+    const r = await fetch('/api/skills/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: editingSkillName, content: editContent.value })
+    }).then(apijson);
+    if (r.error) throw new Error(r.error);
+    editHint.textContent = '✅ 已保存';
+    setTimeout(closeEdit, 600);
+  } catch (e) { editHint.textContent = '❌ ' + e.message; }
+});
+
+async function renameSkill(oldName) {
+  const base = oldName.replace(/\.(txt|md)$/i, '');
+  const newName = prompt('请输入新名称（不含后缀）：', base);
+  if (!newName || newName === base) return;
+  try {
+    const r = await fetch('/api/skills/rename', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ old: oldName, new: newName })
+    }).then(apijson);
+    if (r.error) throw new Error(r.error);
+    localStorage.removeItem('skillChecked_' + oldName);
+    loadSkills();
+  } catch (e) { alert('重命名失败：' + e.message); }
+}
+
+async function deleteSkill(name) {
+  if (!confirm('确定删除 Skill「' + name + '」？此操作不可恢复。')) return;
+  try {
+    const r = await fetch('/api/skills/delete?name=' + encodeURIComponent(name), { method: 'DELETE' }).then(apijson);
+    if (r.error) throw new Error(r.error);
+    localStorage.removeItem('skillChecked_' + name);
+    loadSkills();
+  } catch (e) { alert('删除失败：' + e.message); }
+}
+
+async function loadCreateHistory() {
+  try {
+    const list = await fetch('/api/create/history').then(apijson);
+    createHistList.innerHTML = '';
+    if (!list.length) { createHistList.innerHTML = '<span class="muted">暂无创作历史记录</span>'; return; }
+    list.forEach(h => {
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex; justify-content:space-between; align-items:center; gap:10px; padding:10px 12px; border:1px solid #eee; border-radius:8px; margin-bottom:6px; cursor:pointer; transition:background .15s;';
+      const skillsDisplay = (h.skills || []).map(s => s.replace(/\.(txt|md)$/i, '')).join(', ') || '无';
+      const statusHtml = h.error
+        ? '<span style="color:#ef4444; font-weight:600;">生成失败</span>'
+        : (h.hasOutput ? '<span style="color:#16a34a;">已完成</span>'
+                       : '<span style="color:#ad6800;">未完成</span>');
+      row.innerHTML = `
+        <div style="min-width:0;">
+          <div style="font-size:14px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+            ${escapeHtml((h.prompt || h.time).slice(0, 60))}
+          </div>
+          <div class="muted" style="font-size:12px; margin-top:2px;">
+            ${h.time}｜Skill：${escapeHtml(skillsDisplay)}｜${statusHtml}
+          </div>
+        </div>
+        <div style="display:flex; align-items:center; gap:8px; flex:none;">
+          <button class="btn btn-mini" data-action="delete" style="background:#fff0f0; color:#ef4444; border:1px solid #fecaca; cursor:pointer; padding:4px 10px; font-size:12px; border-radius:4px;">删除</button>
+          <span class="muted">查看 →</span>
+        </div>`;
+      row.addEventListener('mouseenter', () => row.style.background = '#f7f7f7');
+      row.addEventListener('mouseleave', () => row.style.background = '');
+      row.addEventListener('click', (e) => {
+        if (e.target.closest('[data-action=delete]')) return;
+        if (!busy) loadHistoryResult(h.time);
+      });
+      row.querySelector('[data-action=delete]').addEventListener('click', (e) => {
+        e.stopPropagation();
+        deleteCreateHistory(h.time);
+      });
+      createHistList.appendChild(row);
+    });
+  } catch (_) { createHistList.innerHTML = '<span class="muted">创作历史加载失败</span>'; }
+}
+
+async function deleteCreateHistory(timeId) {
+  if (!confirm('确定要删除这条创作记录吗？此操作不可恢复。')) return;
+  try {
+    const r = await fetch('/api/create/history?time=' + encodeURIComponent(timeId), { method: 'DELETE' }).then(apijson);
+    if (r.error) throw new Error(r.error);
+    if (timeBadge.textContent === timeId) { outputCard.style.display = 'none'; timeBadge.textContent = ''; outputContent.innerHTML = ''; }
+    loadCreateHistory();
+  } catch (e) { alert('删除失败：' + e.message); }
+}
+
+async function loadHistoryResult(timeId) {
+  // 注意：不要往 genHint 写状态，那是「生成」流程的专属区域，
+  // 混用会导致生成完成提示被历史查看的状态覆盖，看起来像状态没更新。
+  try {
+    const r = await fetch('/api/create/result?time=' + encodeURIComponent(timeId)).then(apijson);
+    promptInput.value = r.prompt || '';
+    timeBadge.textContent = r.time || '';
+    if (r.error) {
+      // 生成失败的记录：在结果卡片里直接展示失败原因
+      outputContent.innerHTML = '<div class="err-banner">该次生成失败：' +
+        escapeHtml(r.error) + '</div>';
+    } else {
+      outputContent.innerHTML = renderMarkdown(r.output);
+    }
+    outputCard.style.display = 'block';
+    outputCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  } catch (e) {
+    if (!busy) genHint.textContent = '历史记录加载失败：' + e.message;
+  }
+}
+
+btnGenerate.addEventListener('click', async () => {
+  const prompt = promptInput.value.trim();
+  if (!prompt) { genHint.textContent = '请输入创作需求'; return; }
+  if (busy) { genHint.textContent = '正在生成中，请等待当前请求结束…'; return; }
+  const skills = getCheckedSkills();
+
+  busy = true;
+  btnGenerate.disabled = true;
+  currentMd = '';
+  outputContent.innerHTML = '';
+  outputCard.style.display = 'block';           // 点击即出现结果栏
+  outputCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  genHint.textContent = '正在连接上游 API…';
+
+  // 无数据看门狗：每收到任何数据就重置；持续无数据超时则主动中止
+  const ctrl = new AbortController();
+  let noDataTimer = null;
+  const armNoData = () => {
+    clearTimeout(noDataTimer);
+    noDataTimer = setTimeout(() => ctrl.abort(new Error('NO_DATA')), NO_DATA_MS);
+  };
+  armNoData();
+  startElapsedTimer('生成中，');
+
+  let sawDone = false;
+  try {
+    const resp = await fetch('/api/create/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt, skills }),
+      signal: ctrl.signal
+    });
+
+    // 参数/配置类错误仍返回普通 JSON；解析后给出明确错误
+    const ctype = resp.headers.get('Content-Type') || '';
+    if (ctype.includes('application/json')) {
+      const r = await resp.json().catch(() => ({}));
+      throw new Error(r.error || ('请求失败（HTTP ' + resp.status + '）'));
+    }
+    if (!resp.ok || !resp.body) throw new Error('请求失败（HTTP ' + resp.status + '）');
+
+    // 逐段读取 SSE 流：data: {...}\n\n
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      armNoData();
+      buf += decoder.decode(value, { stream: true });
+      let idx;
+      while ((idx = buf.indexOf('\n\n')) !== -1) {
+        const frame = buf.slice(0, idx);
+        buf = buf.slice(idx + 2);
+        const dataLine = frame.split('\n').find(l => l.startsWith('data:'));
+        if (!dataLine) continue;
+        let evt;
+        try { evt = JSON.parse(dataLine.slice(5).trim()); } catch (_) { continue; }
+
+        if (evt.type === 'meta') {
+          timeBadge.textContent = evt.time || '';
+        } else if (evt.type === 'delta') {
+          currentMd += evt.text || '';
+          scheduleStreamRender();
+        } else if (evt.type === 'done') {
+          sawDone = true;
+          stopElapsedTimer();
+          currentMd = evt.output || currentMd;   // 以落盘的清洗版为准
+          scheduleStreamRender();
+          outputContent.scrollTop = 0;
+          timeBadge.textContent = evt.time || timeBadge.textContent;
+          genHint.textContent = '✅ 生成完毕，会话编号：' + (evt.time || '');
+        } else if (evt.type === 'error') {
+          throw new Error(evt.error || '生成失败');
+        }
+      }
+    }
+    if (!sawDone) throw new Error('连接中断，未收到完整结果');
+    loadCreateHistory();
+  } catch (e) {
+    stopElapsedTimer();
+    const aborted = e && (e.name === 'AbortError' || String(e.message).includes('NO_DATA'));
+    if (aborted) {
+      genHint.textContent = '⏱ 长时间未收到数据，已中止。下方历史记录可查看已落盘内容，或直接重试。';
+    } else if (e instanceof TypeError) {
+      genHint.textContent = '❌ 网络异常，无法连接本地服务：' + e.message +
+        '。请确认 python main.py 仍在运行。';
+    } else {
+      genHint.textContent = '❌ ' + e.message;
+    }
+    loadCreateHistory();
+  } finally {
+    clearTimeout(noDataTimer);
+    releaseBusy();
+  }
+});
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && editModal.classList.contains('show')) closeEdit();
+});
+
+loadSkills();
+loadCreateHistory();
+
+// 输入框缓存：离开页面时自动保存，返回时恢复
+const cacheKey = 'novelCreateInputCache';
+promptInput.value = localStorage.getItem(cacheKey) || '';
+promptInput.addEventListener('input', () => {
+  localStorage.setItem(cacheKey, promptInput.value);
+});
+</script>
+</body>
+</html>

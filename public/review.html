@@ -3,14 +3,15 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>审校确认 - 长篇小说审核</title>
+<title>审校确认 - 小说创作助手</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 <div class="topbar">
-  <span class="logo">📖 长篇小说审核</span>
-  <a href="index.html">主界面</a>
-  <a href="review.html" class="active">审核确认</a>
+  <span class="logo">📖 小说创作助手</span>
+  <a href="index.html">审校</a>
+  <a href="review.html" class="active">审校确认</a>
+  <a href="create.html">创作</a>
   <a href="config.html">API 配置</a>
 </div>
 <div class="container">
@@ -18,30 +19,31 @@
     <h2>逐条审校 <span class="badge" id="countBadge">0 条</span></h2>
     <p class="muted" style="margin-bottom:10px;">
       每条问题都给出了原句、AI 原因和建议句。你可以直接采用建议句，或在输入框中修改为自己认可的表述，然后点击「保存」。
-      保存后会在该条记录中写入 <code>userAffirm</code> 字段，并写入 suggestion.json。
     </p>
-    <div style="margin-bottom:10px; display:flex; gap:10px; align-items:center;">
-      <input type="text" id="timeInput" placeholder="输入本次会话编号 (time)，例如 20260913_153000" style="max-width:360px;">
-      <button class="btn" id="btnLoad">加载</button>
-      <button class="btn btn-success" id="btnNewReview" style="margin-left:auto;">新的审核任务</button>
+    <div style="display:flex; gap:10px; align-items:center; margin-bottom:10px;">
+      <button class="btn btn-success" id="btnNewReview">新的审核任务</button>
     </div>
     <div class="err-banner" id="err" style="display:none;"></div>
   </div>
 
+  <div class="card" id="historyCard">
+    <h2>已完成的审核记录（点击查看）</h2>
+    <div id="historyList"><span class="muted">加载中…</span></div>
+  </div>
+
   <div id="list"></div>
   <div class="empty" id="empty" style="display:none;">
-    暂无问题或尚未加载。<br>输入上面的会话编号(t)后点击「加载」，或在主界面处理完成后点击「前往审核确认页」。
+    暂无问题。请从上方已完成的审核记录中选择一条查看。
   </div>
 </div>
 
 <script src="api.js"></script>
 <script>
-const timeInput = document.getElementById('timeInput');
-const btnLoad = document.getElementById('btnLoad');
 const errEl = document.getElementById('err');
 const listEl = document.getElementById('list');
 const emptyEl = document.getElementById('empty');
 const countBadge = document.getElementById('countBadge');
+const historyList = document.getElementById('historyList');
 
 let currentTime = '';
 
@@ -50,15 +52,71 @@ function getTimeFromUrl() {
   return p.get('time');
 }
 
+function escapeHtml(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+async function loadHistory() {
+  try {
+    const list = await fetch('/api/history').then(apijson);
+    historyList.innerHTML = '';
+    const completed = list.filter(h => h.completed);
+    if (!completed.length) {
+      historyList.innerHTML = '<span class="muted">暂无已完成的审核记录</span>';
+      return;
+    }
+    completed.forEach(h => {
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex; justify-content:space-between; align-items:center; gap:10px; padding:10px 12px; border:1px solid #eee; border-radius:8px; margin-bottom:6px; cursor:pointer; transition:background .15s;';
+      row.innerHTML = `
+        <div style="min-width:0;">
+          <div style="font-size:14px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+            ${escapeHtml((h.title || h.time).slice(0, 60))}
+          </div>
+          <div class="muted" style="font-size:12px; margin-top:2px;">
+            ${h.time}｜检测到 <strong>${h.evaluateCount}</strong> 处问题
+          </div>
+        </div>
+        <div style="display:flex; align-items:center; gap:8px; flex:none;">
+          <button class="btn btn-mini" data-action="delete" style="background:#fff0f0; color:#ef4444; border:1px solid #fecaca; cursor:pointer; padding:4px 10px; font-size:12px; border-radius:4px;">删除</button>
+          <span class="muted">查看 →</span>
+        </div>`;
+      row.addEventListener('mouseenter', () => row.style.background = '#f7f7f7');
+      row.addEventListener('mouseleave', () => row.style.background = '');
+      row.addEventListener('click', (e) => {
+        if (e.target.closest('[data-action=delete]')) return;
+        currentTime = h.time;
+        load();
+      });
+      row.querySelector('[data-action=delete]').addEventListener('click', (e) => {
+        e.stopPropagation();
+        deleteHistory(h.time);
+      });
+      historyList.appendChild(row);
+    });
+  } catch (_) {
+    historyList.innerHTML = '<span class="muted">加载失败</span>';
+  }
+}
+
+async function deleteHistory(timeId) {
+  if (!confirm('确定要删除这条审核记录吗？此操作不可恢复。')) return;
+  try {
+    const r = await fetch('/api/history?time=' + encodeURIComponent(timeId), { method: 'DELETE' }).then(apijson);
+    if (r.error) throw new Error(r.error);
+    if (currentTime === timeId) { currentTime = ''; listEl.innerHTML = ''; emptyEl.style.display = 'block'; countBadge.textContent = '0 条'; }
+    loadHistory();
+  } catch (e) { alert('删除失败：' + e.message); }
+}
+
 async function load() {
-  const t = currentTime || getTimeFromUrl();
-  if (!t) { errEl.style.display = 'block'; errEl.textContent = '缺少会话编号。'; return; }
-  currentTime = t;
-  timeInput.value = t;
+  if (!currentTime) { errEl.style.display = 'block'; errEl.textContent = '请先选择一条审核记录。'; return; }
   errEl.style.display = 'none';
   listEl.innerHTML = '';
   try {
-    const r = await fetch('/api/result?time=' + encodeURIComponent(t)).then(apijson);
+    const r = await fetch('/api/result?time=' + encodeURIComponent(currentTime)).then(apijson);
     if (r.error) throw new Error(r.error);
     render(r.suggestions);
   } catch (e) {
@@ -114,28 +172,15 @@ function render(suggestions) {
   });
 }
 
-function escapeHtml(s) {
-  return String(s == null ? '' : s)
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
-
-btnLoad.addEventListener('click', () => {
-  currentTime = timeInput.value.trim();
-  load();
-});
-btnNewReview.addEventListener('click', () => {
+document.getElementById('btnNewReview').addEventListener('click', () => {
   localStorage.removeItem('novelReviewCurrentTime');
   window.location.href = 'index.html';
 });
 
-// auto load if time in url or saved
+loadHistory();
+
 const urlTime = getTimeFromUrl();
-if (urlTime) load();
-else {
-  const saved = localStorage.getItem('novelReviewCurrentTime');
-  if (saved) { currentTime = saved; load(); }
-}
+if (urlTime) { currentTime = urlTime; load(); }
 </script>
 </body>
 </html>

@@ -93,3 +93,28 @@ def evaluate_prompt(summary, numbered):
         "system": EVALUATE_SYSTEM_TEMPLATE.format(schema=EVALUATE_ITEM_SCHEMA),
         "user": EVALUATE_USER_TEMPLATE.format(summary=summary, numbered=numbered),
     }
+
+
+# ---------------- 第四步：AI创作（分镜生成） ----------------
+CREATE_SYSTEM_HEADER = (
+    "你是一位专业的小说创作助手，擅长根据用户提供的技能要求撰写小说分镜。\n"
+    "请严格遵循以下每个技能（Skill）中描述的规则、风格和要求进行创作。\n"
+    "技能之间以明确的分隔标记划分，请仔细阅读每个技能的全部内容。\n"
+)
+
+CREATE_SKILL_SEPARATOR = "\n\n=== SKILL START: {name} ===\n{content}\n=== SKILL END: {name} ===\n"
+
+CREATE_USER_TEMPLATE = "{prompt}"
+
+
+def create_prompt(user_prompt, skills):
+    """构建创作使用的 system prompt，将选中的 skill 加载进 system prompt。
+    skills: list of (skill_name, skill_content)"""
+    system_parts = [CREATE_SYSTEM_HEADER]
+    for name, content in skills:
+        system_parts.append(CREATE_SKILL_SEPARATOR.format(name=name, content=content))
+    system = "".join(system_parts)
+    return {
+        "system": system,
+        "user": CREATE_USER_TEMPLATE.format(prompt=user_prompt),
+    }
