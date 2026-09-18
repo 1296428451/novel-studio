@@ -1,0 +1,868 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI 会话 - 小说创作助手</title>
+<link rel="stylesheet" href="style.css">
+<script src="lib/marked.min.js"></script>
+<style>
+.md-content h1,.md-content h2,.md-content h3,.md-content h4 { margin:14px 0 8px; line-height:1.4; }
+.md-content h1 { font-size:1.3em; border-bottom:1px solid #e3e6eb; padding-bottom:6px; }
+.md-content h2 { font-size:1.15em; border-bottom:1px solid #e3e6eb; padding-bottom:4px; }
+.md-content h3 { font-size:1.05em; }
+.md-content p { margin:6px 0; }
+.md-content ul,.md-content ol { padding-left:22px; margin:6px 0; }
+.md-content li { margin:2px 0; }
+.md-content code { background:#e8e8e8; padding:2px 6px; border-radius:3px; font-size:0.9em; }
+.md-content pre { background:#2d2d2d; color:#f8f8f2; padding:12px 16px; border-radius:6px; overflow-x:auto; font-size:13px; line-height:1.5; }
+.md-content pre code { background:none; padding:0; color:inherit; }
+.md-content blockquote { border-left:4px solid #3b82f6; padding:6px 14px; margin:8px 0; background:#f0f4ff; color:#555; }
+.md-content table { border-collapse:collapse; width:100%; margin:8px 0; }
+.md-content th,.md-content td { border:1px solid #ddd; padding:6px 12px; text-align:left; }
+.md-content th { background:#f5f5f5; font-weight:600; }
+.md-content hr { border:none; border-top:1px solid #e3e6eb; margin:14px 0; }
+</style>
+</head>
+<body>
+<div class="topbar">
+  <span class="logo">📖 小说创作助手</span>
+  <a href="index.html">审校</a>
+  <a href="review.html">审校确认</a>
+  <a href="create.html">创作</a>
+  <a href="chat.html" class="active">AI 会话</a>
+  <a href="config.html">API 配置</a>
+</div>
+<div class="container" style="max-width:920px; margin-top:18px;">
+  <div class="card chat-card">
+    <div class="chat-header">
+      <h2 style="margin:0;">AI 会话</h2>
+      <div class="chat-header-actions">
+        <button class="btn btn-mini" id="btnHistory" type="button">历史会话</button>
+        <button class="btn btn-mini" id="btnNew" type="button">新建会话</button>
+        <button class="btn btn-mini" id="btnSys" type="button">修改系统提示词</button>
+      </div>
+    </div>
+    <p class="muted" style="margin:8px 0 10px;">
+      选择下方一个或多个 API 提供商开始对话；多选时每条消息会由所选提供商同时作答，可逐一查看并采用其中一个。切换仅影响后续消息使用的接口。
+    </p>
+    <div class="sys-prompt-line" id="sysPromptLine"></div>
+
+    <!-- 提供商选择器：多选（点击高亮/取消高亮） -->
+    <div class="provider-bar" id="providerBar"></div>
+    <div class="provider-hint" id="providerHint"></div>
+
+    <div class="chat-messages" id="messages">
+      <div class="empty" id="emptyHint">还没有对话，发送一条消息开始吧。</div>
+    </div>
+
+    <div class="chat-input">
+      <div class="image-preview" id="imagePreview"></div>
+      <div class="chat-input-row">
+        <button class="btn btn-icon" id="btnImage" type="button" title="添加图片（可多张，支持图文问答）">📎</button>
+        <textarea id="input" rows="3" placeholder="输入消息…（Enter 发送，Shift+Enter 换行；可直接 Ctrl+V 粘贴图片）"></textarea>
+        <div class="chat-actions">
+          <span id="status" class="muted"></span>
+          <button class="btn" id="sendBtn">发送</button>
+        </div>
+      </div>
+      <input type="file" id="fileInput" accept="image/*" multiple hidden>
+    </div>
+  </div>
+</div>
+
+<!-- 历史会话抽屉 -->
+<div class="history-overlay" id="historyOverlay"></div>
+<div class="history-panel" id="historyPanel">
+  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+    <h3 style="margin:0;">历史会话</h3>
+    <button class="btn btn-mini" id="btnHistoryClose" type="button">关闭</button>
+  </div>
+  <p class="muted" style="margin:0 0 12px; font-size:13px;">点击任意会话可加载并继续；右侧按钮可删除。</p>
+  <div id="historyList"></div>
+</div>
+
+<!-- 系统提示词弹窗 -->
+<div class="modal-mask" id="sysModal">
+  <div class="modal">
+    <h3 style="margin:0 0 8px;">修改系统提示词</h3>
+    <p class="muted" style="margin:0 0 10px; font-size:13px;">该提示词会在每次请求时作为 system 消息发送，影响助手的整体角色与语气。</p>
+    <textarea id="sysInput" rows="6" style="width:100%; box-sizing:border-box; padding:10px; border:1px solid var(--border); border-radius:8px; font-size:14px; resize:vertical;"></textarea>
+    <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:12px;">
+      <button class="btn btn-mini" id="btnSysCancel" type="button">取消</button>
+      <button class="btn" id="btnSysSave" type="button">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 多提供商回答查看弹窗（MD/RAW 切换 + 采用） -->
+<div class="modal-mask" id="viewModal">
+  <div class="modal view-modal">
+    <div class="vm-head">
+      <h3 style="margin:0;" id="vmTitle">提供商</h3>
+      <div class="vm-toggle">
+        <button type="button" id="vmMdBtn" class="active">MD</button>
+        <button type="button" id="vmRawBtn">RAW</button>
+      </div>
+    </div>
+    <div class="vm-content md-content" id="vmContent"></div>
+    <div class="vm-actions">
+      <span class="muted">点击「采用」后，该提供商的回答将作为本轮回答写入会话历史。</span>
+      <button class="btn btn-success" id="vmAdopt">采用</button>
+    </div>
+  </div>
+</div>
+
+<script src="api.js"></script>
+<script>
+const providerBar = document.getElementById('providerBar');
+const messagesEl = document.getElementById('messages');
+let emptyHint = document.getElementById('emptyHint');
+const inputEl = document.getElementById('input');
+const sendBtn = document.getElementById('sendBtn');
+const statusEl = document.getElementById('status');
+const sysPromptLine = document.getElementById('sysPromptLine');
+const providerHint = document.getElementById('providerHint');
+// 多提供商回答查看弹窗
+const viewModal = document.getElementById('viewModal');
+const vmTitle = document.getElementById('vmTitle');
+const vmContent = document.getElementById('vmContent');
+const vmMdBtn = document.getElementById('vmMdBtn');
+const vmRawBtn = document.getElementById('vmRawBtn');
+const vmAdopt = document.getElementById('vmAdopt');
+
+let providers = [];
+let defaultProvider = '';
+let selectedProviders = [];  // 多选：当前选中的提供商 id 数组
+let history = [];          // 完整对话历史（仅 user/assistant），system 在发送时拼接
+let busy = false;
+let currentRound = null;   // 进行中的多提供商对比轮（未采用前可被下一轮放弃）
+let pendingImages = [];    // 待发送的图片（data URL 列表）
+let systemPrompt = 'You are a helpful assistant.';  // 默认英文系统提示词
+let currentSessionId = ''; // 当前会话在 data/chat/{time} 中的 id，空表示尚未保存
+let currentTitle = '';
+
+function renderMarkdown(text) {
+  if (typeof marked === 'undefined') return (text || '').replace(/\n/g, '<br>');
+  marked.setOptions({ breaks: true, gfm: true });
+  return marked.parse(text || '');
+}
+
+async function api(url, opts) {
+  return fetch(url, opts).then(apijson);
+}
+
+function escapeHtml(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function updateSysLine() {
+  sysPromptLine.textContent = '系统提示词：' + systemPrompt;
+}
+
+// 加载提供商列表并渲染胶囊
+async function loadProviders() {
+  try {
+    const cfg = await api('/api/config');
+    providers = cfg.providers || [];
+    defaultProvider = cfg.defaultProvider || (providers[0] && providers[0].id) || '';
+    // 多选：剔除已不存在的提供商；一个都没剩下时回退到默认提供商
+    const valid = selectedProviders.filter(id => providers.some(p => p.id === id));
+    if (valid.length !== selectedProviders.length || !valid.length) {
+      selectedProviders = valid.length ? valid
+        : (defaultProvider ? [defaultProvider] : (providers[0] ? [providers[0].id] : []));
+    }
+    renderProviders();
+  } catch (e) {
+    providerBar.innerHTML = '<span class="muted">提供商加载失败：' + e.message + '</span>';
+  }
+}
+
+function providerName(pid) {
+  const p = providers.find(x => x.id === pid);
+  return (p && (p.name || p.id)) || pid;
+}
+
+function renderProviders() {
+  providerBar.innerHTML = '';
+  if (!providers.length) {
+    providerBar.innerHTML = '<span class="muted">尚未配置任何 API 提供商，请到 <a href="config.html">API 配置</a> 页添加。</span>';
+    providerHint.textContent = '';
+    return;
+  }
+  providers.forEach(p => {
+    const pill = document.createElement('button');
+    pill.className = 'provider-pill' + (selectedProviders.indexOf(p.id) >= 0 ? ' active' : '');
+    const isDefault = p.id === defaultProvider;
+    pill.innerHTML = escapeHtml(p.name || p.id) + (isDefault ? ' <span class="star">★</span>' : '');
+    pill.title = (p.baseUrl || '') + '  |  ' + (p.model || '');
+    pill.addEventListener('click', () => {
+      // 多选：点击切换高亮（已选中则取消，未选中则加入）
+      const i = selectedProviders.indexOf(p.id);
+      if (i >= 0) selectedProviders.splice(i, 1);
+      else selectedProviders.push(p.id);
+      renderProviders();
+    });
+    providerBar.appendChild(pill);
+  });
+  if (!selectedProviders.length) {
+    providerHint.textContent = '未选择提供商，点击上方胶囊选择（支持多选）。';
+  } else if (selectedProviders.length === 1) {
+    providerHint.textContent = '当前提供商：' + providerName(selectedProviders[0]) + '。再选一个以上即触发多提供商同时作答。';
+  } else {
+    providerHint.textContent = '已选 ' + selectedProviders.length + ' 个提供商：' + selectedProviders.map(providerName).join('、') +
+      ' —— 每条消息将由 ' + selectedProviders.length + ' 个提供商同时作答，可逐一查看并采用其中一个。';
+  }
+}
+
+function appendMessage(role, content, images) {
+  if (emptyHint) { emptyHint.remove(); emptyHint = null; }
+  const wrap = document.createElement('div');
+  wrap.className = 'msg ' + role;
+  const bubble = document.createElement('div');
+  bubble.className = 'bubble md-content';
+  wrap.appendChild(bubble);
+  messagesEl.appendChild(wrap);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+  if (role === 'assistant') {
+    bubble.innerHTML = renderMarkdown(content);
+  } else {
+    if (images && images.length) {
+      const imgs = images.map(u => '<img src="' + u + '" class="user-img" alt="图片">').join('');
+      bubble.innerHTML = (escapeHtml(content) || '') + '<div class="user-imgs">' + imgs + '</div>';
+    } else {
+      bubble.textContent = content;
+    }
+  }
+  return bubble;
+}
+
+function setAssistant(bubble, content) {
+  bubble.innerHTML = renderMarkdown(content);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
+function firstUserText() {
+  for (const m of history) {
+    if (m.role === 'user' && typeof m.content === 'string' && m.content.trim()) {
+      return m.content.trim();
+    }
+  }
+  return '';
+}
+
+async function send() {
+  const text = inputEl.value.trim();
+  const imgs = pendingImages.slice();
+  if ((!text && imgs.length === 0) || busy) return;
+  if (!selectedProviders.length) {
+    statusEl.textContent = '请先至少选择一个 API 提供商';
+    return;
+  }
+
+  // 若上一轮多提供商回答尚未采用，放弃之（该轮回答不再写入历史）
+  abandonRound();
+
+  const single = selectedProviders.length === 1;
+  busy = single;   // 单提供商：流式期间禁用发送；多提供商：允许提前发送下一轮
+  sendBtn.disabled = busy;
+
+  const userMsg = { role: 'user', content: text };
+  if (imgs.length) userMsg.images = imgs;
+  appendMessage('user', text, imgs);   // 用户消息立即上屏
+  inputEl.value = '';
+  history.push(userMsg);
+  pendingImages = [];
+  renderPreview();
+
+  // 用户消息已上屏：先写入历史会话（首次发送会新建会话文件），随后再请求后端
+  try { await saveSession(true); } catch (_) {}
+
+  const apiMessages = [
+    { role: 'system', content: systemPrompt },
+    ...history
+  ];
+
+  if (single) {
+    await streamSingle(apiMessages);
+  } else {
+    startRound(selectedProviders.slice(), apiMessages);
+  }
+}
+
+// ---------------- 单提供商：流式直出到会话并写入历史 ----------------
+async function streamSingle(apiMessages) {
+  const bubble = appendMessage('assistant', '');
+  let acc = '';
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 120000);
+
+  try {
+    const resp = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider: selectedProviders[0], messages: apiMessages }),
+      signal: controller.signal
+    });
+    if (!resp.ok) {
+      let msg = '请求失败（HTTP ' + resp.status + '）';
+      try {
+        const j = await resp.json();
+        if (j && j.error) msg = j.error;
+      } catch (_) {}
+      setAssistant(bubble, '⚠️ ' + msg);
+      statusEl.textContent = '';
+      return;
+    }
+
+    await readSse(resp,
+      piece => { acc += piece; setAssistant(bubble, acc); },
+      err => { setAssistant(bubble, '⚠️ ' + err); }
+    );
+    history.push({ role: 'assistant', content: acc });
+    statusEl.textContent = '';
+    // 若是已保存/已加载的会话，静默更新磁盘
+    if (currentSessionId) saveSession(true);
+  } catch (e) {
+    if (e.name === 'AbortError') {
+      setAssistant(bubble, (acc ? acc + '\n\n' : '') + '⚠️ 请求超时（120 秒无响应），已中断。可重试或检查网络/代理设置。');
+    } else {
+      setAssistant(bubble, '⚠️ ' + (e.message || String(e)));
+    }
+    statusEl.textContent = '';
+  } finally {
+    clearTimeout(timer);
+    busy = false;
+    sendBtn.disabled = false;
+  }
+}
+
+// 读取 SSE 流式响应：文本增量回调 onPiece，上游错误回调 onError（送达后返回）
+async function readSse(resp, onPiece, onError) {
+  if (resp.body && resp.body.getReader) {
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      let idx;
+      while ((idx = buf.indexOf('\n\n')) >= 0) {
+        const chunk = buf.slice(0, idx);
+        buf = buf.slice(idx + 2);
+        if (!chunk.startsWith('data:')) continue;
+        const data = chunk.slice(5).trim();
+        if (data === '[DONE]') continue;
+        let obj;
+        try { obj = JSON.parse(data); } catch (_) { continue; }
+        if (obj.content) onPiece(obj.content);
+        else if (obj.error) { if (onError) onError(obj.error); return; }
+      }
+    }
+    return;
+  }
+  // 极少数环境无 ReadableStream：退化成整体读取
+  const text = await resp.text();
+  const m = text.match(/data:\s*(\{.*\})\s*(?:\n\n|$)/);
+  if (m) {
+    try {
+      const obj = JSON.parse(m[1]);
+      if (obj.content) onPiece(obj.content);
+      else if (obj.error && onError) onError(obj.error);
+    } catch (_) {}
+  }
+}
+
+// ---------------- 多提供商：同时作答 + 查看采用 ----------------
+function startRound(pids, apiMessages) {
+  const round = {
+    pids: pids,
+    status: {},       // pid -> 'pending' | 'done' | 'error'
+    content: {},      // pid -> 已累积的完整回答
+    error: {},        // pid -> 错误信息
+    controllers: {},
+    buttons: {},
+    adopted: false,
+    abandoned: false,
+  };
+  currentRound = round;
+
+  // 对比按钮行（出现在消息区，assistant 一侧）
+  const wrap = document.createElement('div');
+  wrap.className = 'msg assistant';
+  const bubble = document.createElement('div');
+  bubble.className = 'bubble cmp-bubble';
+  const label = document.createElement('div');
+  label.className = 'cmp-label';
+  label.textContent = pids.length + ' 个提供商正在同时作答，点击提供商查看回答并采用其中一个：';
+  const row = document.createElement('div');
+  row.className = 'cmp-buttons';
+  pids.forEach(pid => {
+    round.status[pid] = 'pending';
+    round.content[pid] = '';
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'cmp-btn pending';
+    b.textContent = '⏳ ' + providerName(pid);
+    b.addEventListener('click', () => openView(pid));
+    row.appendChild(b);
+    round.buttons[pid] = b;
+  });
+  bubble.appendChild(label);
+  bubble.appendChild(row);
+  wrap.appendChild(bubble);
+  messagesEl.appendChild(wrap);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+  round.label = label;
+
+  statusEl.textContent = '等待 ' + pids.length + ' 个提供商返回…';
+  pids.forEach(pid => streamOne(round, pid, apiMessages));
+}
+
+// 向单个提供商发起流式请求，结果累积到 round（不直接上屏）
+async function streamOne(round, pid, apiMessages) {
+  const controller = new AbortController();
+  round.controllers[pid] = controller;
+  const timer = setTimeout(() => controller.abort(), 120000);
+  try {
+    const resp = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider: pid, messages: apiMessages }),
+      signal: controller.signal
+    });
+    if (!resp.ok) {
+      let msg = '请求失败（HTTP ' + resp.status + '）';
+      try { const j = await resp.json(); if (j && j.error) msg = j.error; } catch (_) {}
+      throw new Error(msg);
+    }
+    let streamErr = null;
+    await readSse(resp,
+      piece => { round.content[pid] += piece; refreshViewLive(pid); },
+      err => { streamErr = err; }
+    );
+    if (streamErr) throw new Error(streamErr);
+    if (!round.content[pid]) throw new Error('提供商未返回任何内容');
+    finishOne(round, pid, 'done');
+  } catch (e) {
+    finishOne(round, pid, 'error',
+      e.name === 'AbortError' ? '请求超时（120 秒无响应）' : (e.message || String(e)));
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function finishOne(round, pid, state, errMsg) {
+  if (round.adopted || round.abandoned) return;
+  round.status[pid] = state;
+  if (errMsg) round.error[pid] = errMsg;
+  const b = round.buttons[pid];
+  b.classList.remove('pending');
+  b.classList.add(state);
+  b.textContent = providerName(pid) + (state === 'done' ? ' ✓' : ' ✗');
+  const pending = round.pids.filter(p => round.status[p] === 'pending').length;
+  const done = round.pids.filter(p => round.status[p] === 'done').length;
+  if (pending) statusEl.textContent = '还有 ' + pending + ' 个提供商正在返回…';
+  else statusEl.textContent = done + '/' + round.pids.length + ' 个提供商已返回，点击按钮查看并采用；';
+  refreshViewLive(pid);
+}
+
+// 查看弹窗正打开且看的正是该提供商时，实时更新其内容
+function refreshViewLive(pid) {
+  if (viewPid === pid && viewModal.classList.contains('open')) renderView();
+}
+
+// 采用某提供商的回答：作为本轮回答写入历史
+function adopt(pid) {
+  const round = currentRound;
+  if (!round || round.adopted || round.abandoned) return;
+  if (round.status[pid] !== 'done' || !round.content[pid]) return;
+  round.adopted = true;
+
+  viewModal.classList.remove('open');
+  const chosen = round.buttons[pid];
+  chosen.classList.remove('done', 'pending');
+  chosen.classList.add('adopted');
+  chosen.textContent = providerName(pid) + '（已采用）';
+  chosen.disabled = true;
+  round.pids.forEach(p => {
+    if (p === pid) return;
+    const b = round.buttons[p];
+    b.disabled = true;
+    b.classList.remove('pending', 'done');
+    b.classList.add('abandoned');
+    b.textContent = providerName(p) + (round.status[p] === 'error' ? ' ✗（未采用）' : '（未采用）');
+  });
+  round.label.textContent = '已采用：' + providerName(pid);
+
+  const acc = round.content[pid];
+  appendMessage('assistant', acc);
+  history.push({ role: 'assistant', content: acc });
+  statusEl.textContent = '✅ 已采用「' + providerName(pid) + '」的回答';
+  saveSession(true);
+  currentRound = null;
+}
+
+// 放弃未采用的多提供商轮（发送新消息 / 新建会话时调用）
+function abandonRound() {
+  const round = currentRound;
+  if (!round) return;
+  if (!round.adopted) {
+    round.abandoned = true;
+    Object.keys(round.controllers).forEach(pid => {
+      try { round.controllers[pid].abort(); } catch (_) {}
+    });
+    round.pids.forEach(pid => {
+      const b = round.buttons[pid];
+      b.disabled = true;
+      b.classList.remove('pending', 'done');
+      b.classList.add('abandoned');
+    });
+    round.label.textContent = '本轮回答未采用（已被下一条消息取代）。';
+  }
+  currentRound = null;
+}
+
+// ---------------- 回答查看弹窗（MD/RAW 切换 + 采用） ----------------
+let viewPid = null;
+let viewMode = 'md';
+
+function openView(pid) {
+  const round = currentRound;
+  if (!round || round.adopted || round.abandoned) return;
+  viewPid = pid;
+  viewMode = 'md';
+  vmTitle.textContent = providerName(pid);
+  syncViewToggle();
+  renderView();
+  viewModal.classList.add('open');
+}
+
+function closeView() { viewModal.classList.remove('open'); }
+
+function syncViewToggle() {
+  vmMdBtn.classList.toggle('active', viewMode === 'md');
+  vmRawBtn.classList.toggle('active', viewMode === 'raw');
+  vmContent.classList.toggle('raw', viewMode === 'raw');
+}
+
+function renderView() {
+  const round = currentRound;
+  if (!round || !viewPid) return;
+  const st = round.status[viewPid] || 'pending';
+  vmMdBtn.disabled = (st === 'pending');
+  vmRawBtn.disabled = (st === 'pending');
+  if (st === 'pending') {
+    vmContent.textContent = '⏳ 等待提供商返回…';
+    vmAdopt.disabled = true;
+    return;
+  }
+  if (st === 'error') {
+    vmContent.textContent = '⚠️ ' + (round.error[viewPid] || '请求失败');
+    vmAdopt.disabled = true;
+    return;
+  }
+  const text = round.content[viewPid] || '';
+  if (viewMode === 'md') vmContent.innerHTML = renderMarkdown(text);
+  else vmContent.textContent = text;
+  vmAdopt.disabled = !text;
+}
+
+vmMdBtn.addEventListener('click', () => { viewMode = 'md'; syncViewToggle(); renderView(); });
+vmRawBtn.addEventListener('click', () => { viewMode = 'raw'; syncViewToggle(); renderView(); });
+vmAdopt.addEventListener('click', () => { if (viewPid) adopt(viewPid); });
+viewModal.addEventListener('click', (e) => { if (e.target === viewModal) closeView(); });
+
+sendBtn.addEventListener('click', send);
+
+inputEl.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    send();
+  }
+});
+
+// 新建会话：重置当前对话状态，下一条消息将创建新的历史会话
+function startNewSession() {
+  if (busy) { statusEl.textContent = '当前请求正在进行，请等待完成后再新建会话'; return; }
+  abandonRound();
+  closeView();
+  history = [];
+  currentSessionId = '';
+  currentTitle = '';
+  messagesEl.innerHTML = '<div class="empty" id="emptyHint">还没有对话，发送一条消息开始吧。</div>';
+  emptyHint = document.getElementById('emptyHint');
+  pendingImages = [];
+  renderPreview();
+  inputEl.focus();
+}
+
+
+// ---------------- 图片附件（导入 + 粘贴） ----------------
+const btnImage = document.getElementById('btnImage');
+const fileInput = document.getElementById('fileInput');
+const imagePreview = document.getElementById('imagePreview');
+
+function fileToDataUrl(file, maxDim) {
+  maxDim = maxDim || 1280;
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('读取图片失败'));
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        let w = img.width, h = img.height;
+        if (w > maxDim || h > maxDim) {
+          const scale = Math.min(maxDim / w, maxDim / h);
+          w = Math.round(w * scale); h = Math.round(h * scale);
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL('image/png'));
+      };
+      img.onerror = () => reject(new Error('图片解析失败'));
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function renderPreview() {
+  imagePreview.innerHTML = '';
+  if (!pendingImages.length) {
+    imagePreview.style.display = 'none';
+    return;
+  }
+  imagePreview.style.display = 'flex';
+  pendingImages.forEach((url, i) => {
+    const thumb = document.createElement('div');
+    thumb.className = 'thumb';
+    thumb.innerHTML = '<img src="' + url + '" alt="预览"><button type="button" class="thumb-x" title="移除">×</button>';
+    thumb.querySelector('.thumb-x').addEventListener('click', () => {
+      pendingImages.splice(i, 1);   // 点击缩略图上的 × 删除该图片
+      renderPreview();
+    });
+    imagePreview.appendChild(thumb);
+  });
+}
+
+btnImage.addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', async () => {
+  const files = Array.from(fileInput.files || []);
+  fileInput.value = '';
+  if (!files.length) return;
+  await addImageFiles(files);
+});
+
+// 把文件列表读入待发送图片
+async function addImageFiles(files) {
+  statusEl.textContent = '读取图片中…';
+  try {
+    for (const f of files) {
+      if (!f.type || f.type.indexOf('image/') !== 0) continue;
+      const url = await fileToDataUrl(f);
+      pendingImages.push(url);
+    }
+    renderPreview();
+    statusEl.textContent = '';
+  } catch (e) {
+    statusEl.textContent = e.message;
+  }
+}
+
+// 粘贴图片：在输入框内 Ctrl+V 粘贴图片时，加入待发送区（出现在聊天框上方），不污染文本
+inputEl.addEventListener('paste', async (e) => {
+  const items = (e.clipboardData && e.clipboardData.items) ? e.clipboardData.items : [];
+  const imageFiles = [];
+  for (const it of items) {
+    if (it.kind === 'file' && it.type && it.type.indexOf('image/') === 0) {
+      const f = it.getAsFile();
+      if (f) imageFiles.push(f);
+    }
+  }
+  if (imageFiles.length) {
+    e.preventDefault();   // 阻止把图片以文件名/乱码形式插入文本框
+    await addImageFiles(imageFiles);
+  }
+});
+
+// ---------------- 系统提示词 ----------------
+const btnSys = document.getElementById('btnSys');
+const sysModal = document.getElementById('sysModal');
+const sysInput = document.getElementById('sysInput');
+const btnSysSave = document.getElementById('btnSysSave');
+const btnSysCancel = document.getElementById('btnSysCancel');
+
+btnSys.addEventListener('click', () => {
+  sysInput.value = systemPrompt;
+  sysModal.classList.add('open');
+  sysInput.focus();
+});
+btnSysCancel.addEventListener('click', () => sysModal.classList.remove('open'));
+sysModal.addEventListener('click', (e) => { if (e.target === sysModal) sysModal.classList.remove('open'); });
+btnSysSave.addEventListener('click', () => {
+  systemPrompt = sysInput.value;
+  updateSysLine();
+  sysModal.classList.remove('open');
+});
+
+// ---------------- 历史会话（保存/加载/删除） ----------------
+const btnHistory = document.getElementById('btnHistory');
+const historyPanel = document.getElementById('historyPanel');
+const historyOverlay = document.getElementById('historyOverlay');
+const historyList = document.getElementById('historyList');
+const btnHistoryClose = document.getElementById('btnHistoryClose');
+const btnNew = document.getElementById('btnNew');
+
+btnHistory.addEventListener('click', openHistory);
+btnHistoryClose.addEventListener('click', closeHistory);
+historyOverlay.addEventListener('click', closeHistory);
+
+function openHistory() {
+  loadHistoryList();
+  historyPanel.classList.add('open');
+  historyOverlay.classList.add('open');
+}
+function closeHistory() {
+  historyPanel.classList.remove('open');
+  historyOverlay.classList.remove('open');
+}
+
+async function loadHistoryList() {
+  historyList.innerHTML = '<p class="muted">加载中…</p>';
+  try {
+    const list = await api('/api/chat/history');
+    if (!list.length) {
+      historyList.innerHTML = '<p class="muted">暂无历史会话。开始一段对话后会自动记录在这里。</p>';
+      return;
+    }
+    historyList.innerHTML = '';
+    list.forEach(item => {
+      const div = document.createElement('div');
+      div.className = 'history-item' + (item.time === currentSessionId ? ' active' : '');
+      const t = item.updated_at || item.created_at || '';
+      div.innerHTML =
+        '<div class="hi-del"><button class="btn btn-mini hi-del-btn" type="button" title="删除">删除</button></div>' +
+        '<div class="hi-title">' + escapeHtml(item.title || item.time) + '</div>' +
+        '<div class="hi-meta">' + escapeHtml(item.time) + (item.provider ? ' · ' + escapeHtml(item.provider) : '') +
+        ' · ' + (item.message_count || 0) + ' 条' + (t ? ' · ' + escapeHtml(t) : '') + '</div>' +
+        '<div class="hi-meta">' + escapeHtml(item.preview || '（无文本消息）') + '</div>';
+      // 点击条目加载并继续
+      div.addEventListener('click', () => loadSession(item.time));
+      div.querySelector('.hi-del-btn').addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        deleteSession(item.time);
+      });
+      historyList.appendChild(div);
+    });
+  } catch (e) {
+    historyList.innerHTML = '<p class="muted">加载失败：' + e.message + '</p>';
+  }
+}
+
+async function saveSession(silent) {
+  if (!history.length) {
+    if (!silent) statusEl.textContent = '暂无内容可保存';
+    return;
+  }
+  const title = currentTitle || (firstUserText().slice(0, 40)) || ('会话 ' + (currentSessionId || ''));
+  const body = {
+    messages: history,
+    system_prompt: systemPrompt,
+    provider: selectedProviders.join(','),
+    title: title,
+  };
+  if (currentSessionId) body.time = currentSessionId;
+  try {
+    const r = await api('/api/chat/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    if (r.ok) {
+      currentSessionId = r.time;
+      currentTitle = title;
+      if (!silent) statusEl.textContent = '✅ 已保存';
+    } else if (!silent) {
+      statusEl.textContent = '❌ ' + (r.error || '保存失败');
+    }
+  } catch (e) {
+    if (!silent) statusEl.textContent = '❌ ' + e.message;
+  }
+}
+
+btnNew.addEventListener('click', startNewSession);
+
+async function loadSession(time) {
+  try {
+    const data = await api('/api/chat/session?time=' + encodeURIComponent(time));
+    const msgs = Array.isArray(data.messages) ? data.messages : [];
+    history = msgs.filter(m => m.role === 'user' || m.role === 'assistant');
+    systemPrompt = data.system_prompt || 'You are a helpful assistant.';
+    currentSessionId = time;
+    currentTitle = data.title || '';
+    updateSysLine();
+    // provider 可能是单个 id，也可能是逗号分隔的多选列表（兼容两种格式）
+    if (data.provider) {
+      const ids = String(data.provider).split(',').map(s => s.trim()).filter(Boolean);
+      const valid = ids.filter(id => providers.some(p => p.id === id));
+      if (valid.length) {
+        selectedProviders = valid;
+        renderProviders();
+      }
+    }
+    loadIntoUI(history);
+    closeHistory();
+    statusEl.textContent = '已加载会话';
+  } catch (e) {
+    statusEl.textContent = '加载失败：' + e.message;
+  }
+}
+
+function loadIntoUI(msgs) {
+  messagesEl.innerHTML = '';
+  emptyHint = null;
+  if (!msgs.length) {
+    messagesEl.innerHTML = '<div class="empty" id="emptyHint">还没有对话，发送一条消息开始吧。</div>';
+    emptyHint = document.getElementById('emptyHint');
+    return;
+  }
+  msgs.forEach(m => {
+    if (m.role === 'assistant') appendMessage('assistant', m.content || '');
+    else if (m.role === 'user') appendMessage('user', m.content || '', m.images);
+  });
+}
+
+async function deleteSession(time) {
+  if (!confirm('确定删除该会话？此操作不可恢复。')) return;
+  try {
+    const r = await api('/api/chat/history?time=' + encodeURIComponent(time), { method: 'DELETE' });
+    if (r.ok) {
+      if (currentSessionId === time) {
+        history = [];
+        currentSessionId = '';
+        currentTitle = '';
+        loadIntoUI([]);
+      }
+      loadHistoryList();
+    } else {
+      statusEl.textContent = '❌ ' + (r.error || '删除失败');
+    }
+  } catch (e) {
+    statusEl.textContent = '❌ ' + e.message;
+  }
+}
+
+// 从「API 配置」页返回时实时刷新提供商列表
+window.addEventListener('focus', () => { loadProviders(); });
+document.addEventListener('visibilitychange', () => { if (!document.hidden) loadProviders(); });
+
+updateSysLine();
+loadProviders();
+</script>
+</body>
+</html>

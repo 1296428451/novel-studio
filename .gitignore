@@ -1,5 +1,7 @@
 data/
+skill/
 *.pyc
+*.agent
 __pycache__/
 .env
 .venv/

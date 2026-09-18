@@ -96,6 +96,9 @@ def evaluate_prompt(summary, numbered):
 
 
 # ---------------- 第四步：AI创作（分镜生成） ----------------
+# 未选择任何 Skill 时的默认官方提示词——像普通对话一样，不附加 Skill 规则
+CREATE_DEFAULT_SYSTEM = "You are a helpful assistant."
+
 CREATE_SYSTEM_HEADER = (
     "你是一位专业的小说创作助手，擅长根据用户提供的技能要求撰写小说分镜。\n"
     "请严格遵循以下每个技能（Skill）中描述的规则、风格和要求进行创作。\n"
@@ -109,11 +112,15 @@ CREATE_USER_TEMPLATE = "{prompt}"
 
 def create_prompt(user_prompt, skills):
     """构建创作使用的 system prompt，将选中的 skill 加载进 system prompt。
-    skills: list of (skill_name, skill_content)"""
-    system_parts = [CREATE_SYSTEM_HEADER]
-    for name, content in skills:
-        system_parts.append(CREATE_SKILL_SEPARATOR.format(name=name, content=content))
-    system = "".join(system_parts)
+    skills: list of (skill_name, skill_content)
+    如果未选择任何 skill，则使用默认官方提示词，像普通对话一样。"""
+    if not skills:
+        system = CREATE_DEFAULT_SYSTEM
+    else:
+        system_parts = [CREATE_SYSTEM_HEADER]
+        for name, content in skills:
+            system_parts.append(CREATE_SKILL_SEPARATOR.format(name=name, content=content))
+        system = "".join(system_parts)
     return {
         "system": system,
         "user": CREATE_USER_TEMPLATE.format(prompt=user_prompt),

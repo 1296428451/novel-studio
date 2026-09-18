@@ -14,6 +14,7 @@ APP_ROOT = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(APP_ROOT, "data")
 REVIEW_DATA_DIR = os.path.join(DATA_DIR, "review")
 CREATE_DATA_DIR = os.path.join(DATA_DIR, "create")
+CHAT_DATA_DIR = os.path.join(DATA_DIR, "chat")
 SKILL_DIR = os.path.join(APP_ROOT, "skill")
 CONFIG_FILE = os.path.join(DATA_DIR, "config.json")
 
@@ -33,13 +34,108 @@ def ensure_data_dir():
 
 
 def get_config():
+    """读取配置并归一化为「多提供商」结构。
+
+    返回结构：
+    {
+        "providers": [{"id","name","baseUrl","apiKey","model"}, ...],
+        "defaultProvider": "<id>",
+        "proxy_mode": "direct" | "proxy",
+        "proxy_url": "...",
+        # 以下为兼容旧调用方（审校/创作流程）的便利字段，等于默认提供商的值
+        "baseUrl": "...", "apiKey": "...", "model": "..."
+    }
+
+    旧版单组配置（直接含 baseUrl/apiKey/model）会自动包装为单个名为
+    "默认提供商" 的提供商，保证向后兼容。
+    """
+    raw = {}
     if os.path.exists(CONFIG_FILE):
         try:
             with open(CONFIG_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
+                raw = json.load(f) or {}
         except Exception:
-            pass
-    return {"baseUrl": "", "apiKey": "", "model": ""}
+            raw = {}
+    if not isinstance(raw, dict):
+        raw = {}
+
+    providers = raw.get("providers")
+    if isinstance(providers, list) and providers:
+        default_id = raw.get("defaultProvider")
+        default = next((p for p in providers if p.get("id") == default_id), None) or providers[0]
+        merged = {
+            "providers": providers,
+            "defaultProvider": default.get("id"),
+            "proxy_mode": raw.get("proxy_mode") or "direct",
+            "proxy_url": raw.get("proxy_url") or "",
+        }
+        # 便利字段：供 _open_chat_request 等旧调用方直接使用
+        merged["baseUrl"] = default.get("baseUrl", "")
+        merged["apiKey"] = default.get("apiKey", "")
+        merged["model"] = default.get("model", "")
+        return merged
+
+    # 旧版单组格式：包装为单个提供商
+    pid = "default"
+    provider = {
+        "id": pid,
+        "name": "默认提供商",
+        "baseUrl": raw.get("baseUrl", ""),
+        "apiKey": raw.get("apiKey", ""),
+        "model": raw.get("model", ""),
+    }
+    return {
+        "providers": [provider],
+        "defaultProvider": pid,
+        "proxy_mode": raw.get("proxy_mode") or "direct",
+        "proxy_url": raw.get("proxy_url") or "",
+        "baseUrl": raw.get("baseUrl", ""),
+        "apiKey": raw.get("apiKey", ""),
+        "model": raw.get("model", ""),
+    }
+
+
+def get_provider_config(config, provider_id=None):
+    """从归一化配置中取出某个提供商，返回可直接传给 chat_stream 的 config 字典。
+
+    provider_id 为 None 时取默认提供商。
+    """
+    providers = (config or {}).get("providers", [])
+    if provider_id:
+        prov = next((p for p in providers if p.get("id") == provider_id), None)
+    else:
+        prov = None
+    if prov is None:
+        did = (config or {}).get("defaultProvider")
+        prov = next((p for p in providers if p.get("id") == did), None) or (providers[0] if providers else None)
+    if prov is None:
+        return None
+    return {
+        "baseUrl": prov.get("baseUrl", ""),
+        "apiKey": prov.get("apiKey", ""),
+        "model": prov.get("model", ""),
+        "proxy_mode": (config or {}).get("proxy_mode", "direct"),
+        "proxy_url": (config or {}).get("proxy_url", ""),
+    }
+
+
+def get_proxies(config=None):
+    """根据配置返回代理参数字典供 requests 使用。
+
+    关键：direct 模式必须显式返回 {"http": None, "https": None}，
+    否则 requests 会回退到系统 HTTP_PROXY/HTTPS_PROXY 环境变量，
+    在已设置全局代理的机器上会把 API 请求错误地转发到无法访问该主机的代理，
+    表现为「发送后长时间无响应」。显式置 None 可强制直连、忽略系统代理。
+    """
+    if config is None:
+        config = get_config()
+    mode = str(config.get("proxy_mode") or "direct").strip()
+    if mode == "proxy":
+        url = str(config.get("proxy_url") or "").strip()
+        if url:
+            return {"http": url, "https": url}
+    # direct 模式，或 proxy 模式但未填地址：明确不走任何代理
+    return {"http": None, "https": None}
 
 
 def save_config(cfg):
@@ -68,6 +164,16 @@ def create_run_dir(time_id):
 
 def ensure_create_time_dir(time_id):
     d = create_run_dir(time_id)
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+def chat_run_dir(time_id):
+    return os.path.join(CHAT_DATA_DIR, time_id)
+
+
+def ensure_chat_time_dir(time_id):
+    d = chat_run_dir(time_id)
     os.makedirs(d, exist_ok=True)
     return d
 
@@ -118,6 +224,7 @@ def ensure_data_layout():
     ensure_data_dir()
     os.makedirs(REVIEW_DATA_DIR, exist_ok=True)
     os.makedirs(CREATE_DATA_DIR, exist_ok=True)
+    os.makedirs(CHAT_DATA_DIR, exist_ok=True)
 
 
 def migrate_legacy_review_data():
@@ -204,6 +311,34 @@ def number_blocks(blocks, lines):
 
 
 # ---------------- OpenAI 兼容接口调用 ----------------
+def _normalize_messages(messages):
+    """将用户消息里的 images 字段展开为 OpenAI 多模态 content 结构。
+
+    前端对带图的用户消息发送 {"role":"user","content":<文本>,"images":[<data URL>...]}，
+    这里转换为 [{"type":"text",...},{"type":"image_url",...}] 形式，便于视觉模型理解。
+    其余消息原样透传。
+    """
+    out = []
+    for m in messages or []:
+        if not isinstance(m, dict):
+            out.append(m)
+            continue
+        if m.get("role") == "user":
+            images = m.get("images")
+            if isinstance(images, list) and any(images):
+                parts = []
+                content = m.get("content", "")
+                if content:
+                    parts.append({"type": "text", "text": content})
+                for img in images:
+                    if img:
+                        parts.append({"type": "image_url", "image_url": {"url": img}})
+                out.append({"role": "user", "content": parts})
+                continue
+        out.append(m)
+    return out
+
+
 def _extract_text_from_content(content):
     if content is None:
         return ""
@@ -278,8 +413,12 @@ def _clean_snippet(text, max_len=300):
     return clean if clean else "(无内容)"
 
 
-def _open_chat_request(config, system_prompt, user_content):
-    """向 OpenAI 兼容接口发起流式请求，返回 response。失败抛 UpstreamError。"""
+def _open_chat_request(config, system_prompt=None, user_content=None, messages=None, temperature=0.3):
+    """向 OpenAI 兼容接口发起流式请求，返回 response。失败抛 UpstreamError。
+
+    messages 不为 None 时直接使用该消息列表（多轮对话）；否则由
+    system_prompt + user_content 构造单轮消息。
+    """
     base_url = str(config.get("baseUrl") or "").strip()
     api_key = config.get("apiKey") or ""
     model = config.get("model") or ""
@@ -287,16 +426,23 @@ def _open_chat_request(config, system_prompt, user_content):
         base_url += "/"
     endpoint = base_url + "chat/completions"
 
+    if messages is None:
+        messages = [
+            {"role": "system", "content": system_prompt or ""},
+            {"role": "user", "content": user_content or ""},
+        ]
+
+    # 展开带图片的用户消息为视觉模型可用的 content 结构
+    messages = _normalize_messages(messages)
+
     payload = {
         "model": model,
-        "temperature": 0.3,
+        "temperature": temperature,
         "stream": True,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_content},
-        ],
+        "messages": messages,
     }
 
+    proxies = get_proxies(config)
     try:
         resp = requests.post(
             endpoint,
@@ -307,6 +453,7 @@ def _open_chat_request(config, system_prompt, user_content):
             json=payload,
             timeout=(CHAT_CONNECT_TIMEOUT, CHAT_READ_TIMEOUT),
             stream=True,
+            proxies=proxies,
         )
         resp.raise_for_status()
     except requests.exceptions.ConnectTimeout:
@@ -329,13 +476,17 @@ def _open_chat_request(config, system_prompt, user_content):
     return resp
 
 
-def chat_stream(config, system_prompt, user_content):
+def chat_stream(config, system_prompt=None, user_content=None, messages=None, temperature=0.3):
     """流式调用上游 API：逐段 yield 文本增量，失败抛 UpstreamError。
+
+    支持两种用法：
+      - 单轮：chat_stream(config, system_prompt, user_content)
+      - 多轮：chat_stream(config, messages=[...], temperature=0.7)
 
     yield 出的增量是原始 content（未做 strip_reasoning），供前端实时显示；
     需要清洗后全文的场景由调用方聚合处理（见 chat()）。
     """
-    resp = _open_chat_request(config, system_prompt, user_content)
+    resp = _open_chat_request(config, system_prompt, user_content, messages, temperature)
     try:
         content_type = resp.headers.get("Content-Type", "")
         if "text/event-stream" not in content_type:

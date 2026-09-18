@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>API 配置 - 长篇小说审核</title>
+<title>API 配置 - 小说创作助手</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -12,133 +12,341 @@
   <a href="index.html">审校</a>
   <a href="review.html">审校确认</a>
   <a href="create.html">创作</a>
+  <a href="chat.html">AI 会话</a>
   <a href="config.html" class="active">API 配置</a>
 </div>
 <div class="container">
   <div class="card">
-    <h2>OpenAI 兼容接口配置</h2>
+    <h2>API 提供商配置</h2>
     <p class="muted" style="margin-bottom:14px;">
-      配置调用 API 所需的参数，保存后用于文本总结、分块与问题检测。支持任何 OpenAI 兼容的 chat/completions 接口（含代理与私有部署）。
+      支持配置多个 OpenAI 兼容接口（baseUrl / apiKey / model）。可设置其中一个为默认提供商，AI 会话页与各创作流程默认使用它。
       API Key 仅保存在本机 <code>data/config.json</code>，不会上传到其它服务器。
     </p>
-    <div style="margin-bottom:12px;">
-      <label style="display:block; margin-bottom:6px; font-size:14px;">Base URL（如 https://api.openai.com/v1 或代理地址）</label>
-      <input type="text" id="baseUrl" placeholder="https://api.openai.com/v1">
-    </div>
-    <div style="margin-bottom:12px;">
-      <label style="display:block; margin-bottom:6px; font-size:14px;">API Key</label>
-      <input type="password" id="apiKey" placeholder="sk-...">
-    </div>
-    <div style="margin-bottom:16px;">
-      <label style="display:block; margin-bottom:6px; font-size:14px;">模型名</label>
-      <div style="display:flex; gap:8px; align-items:center;">
-        <div style="position:relative; flex:1;">
-          <div style="display:flex; border:1px solid var(--border, #ccc); border-radius:6px; overflow:visible;">
-            <input type="text" id="model" placeholder="gpt-4o / claude-3-5-sonnet / qwen…" style="flex:1; border:none; outline:none; padding:8px 12px; font-size:14px; background:transparent;">
-            <button id="btnDropdown" style="border:none; background:transparent; padding:0 10px; cursor:pointer; font-size:12px; color:#888;" title="展开模型列表">▼</button>
-          </div>
-          <div id="modelDropdown" style="display:none; position:absolute; top:100%; left:0; right:0; z-index:50; background:#fff; border:1px solid #d0d5dd; border-radius:0 0 6px 6px; max-height:240px; overflow-y:auto; box-shadow:0 4px 12px rgba(0,0,0,.1);">
-          </div>
+
+    <!-- 已有提供商列表 -->
+    <div id="providerList"></div>
+
+    <button class="btn" id="btnAdd" style="margin-top:6px;">➕ 新增 API 提供商</button>
+
+    <!-- 新增/编辑表单（默认隐藏） -->
+    <div id="editor" class="editor-box" style="display:none;">
+      <h3 style="margin-bottom:12px; font-size:15px;">提供商信息</h3>
+      <div style="margin-bottom:12px;">
+        <label style="display:block; margin-bottom:6px; font-size:14px;">名称（便于区分，可留空）</label>
+        <input type="text" id="edName" placeholder="如：我的 OpenAI / 本地 Ollama">
+      </div>
+      <div style="margin-bottom:12px;">
+        <label style="display:block; margin-bottom:6px; font-size:14px;">Base URL（如 https://api.openai.com/v1 或代理地址）</label>
+        <input type="text" id="edBaseUrl" placeholder="https://api.openai.com/v1">
+      </div>
+      <div style="margin-bottom:12px;">
+        <label style="display:block; margin-bottom:6px; font-size:14px;">API Key</label>
+        <div style="display:flex; gap:8px; align-items:center;">
+          <input type="password" id="edApiKey" placeholder="sk-..." style="flex:1;">
+          <button id="edToggleKey" type="button" title="显示/隐藏" style="padding:8px 12px; background:#f3f4f6; border:1px solid #d1d5db; border-radius:8px; cursor:pointer;">👁️</button>
         </div>
-        <button class="btn btn-mini" id="btnFetchModels" style="white-space:nowrap;">获取模型</button>
-        <span id="modelHint" class="muted" style="font-size:12px;"></span>
+      </div>
+      <div style="margin-bottom:14px;">
+        <label style="display:block; margin-bottom:6px; font-size:14px;">模型名</label>
+        <div style="display:flex; gap:8px; align-items:center;">
+          <div style="position:relative; flex:1;">
+            <div style="display:flex; border:1px solid var(--border, #ccc); border-radius:6px; overflow:visible;">
+              <input type="text" id="edModel" placeholder="gpt-4o / claude-3-5-sonnet / qwen…" style="flex:1; border:none; outline:none; padding:8px 12px; font-size:14px; background:transparent;">
+              <button id="edBtnDropdown" type="button" style="border:none; background:transparent; padding:0 10px; cursor:pointer; font-size:12px; color:#888;" title="展开模型列表">▼</button>
+            </div>
+            <div id="edModelDropdown" style="display:none; position:absolute; top:100%; left:0; right:0; z-index:50; background:#fff; border:1px solid #d0d5dd; border-radius:0 0 6px 6px; max-height:240px; overflow-y:auto; box-shadow:0 4px 12px rgba(0,0,0,.1);"></div>
+          </div>
+          <button class="btn btn-mini" id="edBtnFetch" type="button" style="white-space:nowrap;">获取模型</button>
+          <span id="edModelHint" class="muted" style="font-size:12px;"></span>
+        </div>
+      </div>
+      <div style="display:flex; gap:12px; align-items:center;">
+        <button class="btn btn-success" id="edSave" type="button">保存提供商</button>
+        <button class="btn" id="edCancel" type="button" style="background:#9ca3af;">取消</button>
+        <span id="edMsg" class="muted" style="font-size:13px;"></span>
       </div>
     </div>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-bottom:12px; font-size:16px;">网络代理（全局）</h3>
+    <div style="margin-bottom:12px;">
+      <label style="display:block; margin-bottom:6px; font-size:14px;">代理模式</label>
+      <div style="display:flex; gap:16px; align-items:center;">
+        <label style="display:flex; align-items:center; gap:4px; cursor:pointer; font-size:14px;">
+          <input type="radio" name="proxyMode" value="direct" checked> 直连
+        </label>
+        <label style="display:flex; align-items:center; gap:4px; cursor:pointer; font-size:14px;">
+          <input type="radio" name="proxyMode" value="proxy"> 代理
+        </label>
+      </div>
+    </div>
+    <div id="proxyUrlGroup" style="margin-bottom:16px; display:none;">
+      <label style="display:block; margin-bottom:6px; font-size:14px;">代理地址（如 http://127.0.0.1:7890）</label>
+      <input type="text" id="proxyUrl" placeholder="http://127.0.0.1:7890">
+    </div>
     <div style="display:flex; gap:12px; align-items:center;">
-      <button class="btn" id="btnSave">保存配置</button>
-      <span id="msg" style="font-size:14px;"></span>
+      <button class="btn" id="btnSave">保存全部配置</button>
+      <span id="msg" class="muted" style="font-size:14px;"></span>
     </div>
   </div>
 </div>
 <script src="api.js"></script>
 <script>
-const baseUrlEl = document.getElementById('baseUrl');
-const apiKeyEl = document.getElementById('apiKey');
-const modelEl = document.getElementById('model');
-const msg = document.getElementById('msg');
-const modelDropdown = document.getElementById('modelDropdown');
-const modelHint = document.getElementById('modelHint');
-const btnDropdown = document.getElementById('btnDropdown');
+// ---- 状态 ----
+let providers = [];
+let defaultProvider = '';
+let proxyMode = 'direct';
+let proxyUrl = '';
+let editingId = null; // 非空表示正在编辑某个提供商
 
+const providerList = document.getElementById('providerList');
+const editor = document.getElementById('editor');
+const edName = document.getElementById('edName');
+const edBaseUrl = document.getElementById('edBaseUrl');
+const edApiKey = document.getElementById('edApiKey');
+const edModel = document.getElementById('edModel');
+const edModelHint = document.getElementById('edModelHint');
+const edModelDropdown = document.getElementById('edModelDropdown');
+const edBtnDropdown = document.getElementById('edBtnDropdown');
+const edMsg = document.getElementById('edMsg');
+const proxyUrlEl = document.getElementById('proxyUrl');
+const proxyUrlGroup = document.getElementById('proxyUrlGroup');
+const proxyRadios = document.querySelectorAll('input[name="proxyMode"]');
+const msg = document.getElementById('msg');
+
+function genId() {
+  return 'p_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+}
+
+function escapeHtml(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+async function api(url, opts) { return fetch(url, opts).then(apijson); }
+
+// 立即把当前 providers / 默认 / 代理设置写入磁盘，避免只点「保存提供商」而忘了点「保存全部配置」导致丢失。
+async function persist() {
+  const body = {
+    providers: providers,
+    defaultProvider: defaultProvider || (providers[0] && providers[0].id) || '',
+    proxy_mode: document.querySelector('input[name="proxyMode"]:checked').value,
+    proxy_url: proxyUrlEl.value.trim()
+  };
+  const r = await fetch('/api/config', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  }).then(apijson);
+  if (!r.ok) throw new Error(r.error || '保存失败');
+  return r;
+}
+
+// ---- 加载 ----
 async function load() {
   try {
-    const cfg = await fetch('/api/config').then(apijson);
-    baseUrlEl.value = cfg.baseUrl || '';
-    apiKeyEl.value = cfg.apiKey || '';
-    modelEl.value = cfg.model || '';
-  } catch (_) {}
-}
-load();
-
-document.getElementById('btnSave').addEventListener('click', async () => {
-  msg.textContent = '保存中…';
-  const body = {
-    baseUrl: baseUrlEl.value.trim(),
-    apiKey: apiKeyEl.value.trim(),
-    model: modelEl.value.trim()
-  };
-  try {
-    const r = await fetch('/api/config', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body)
-    }).then(apijson);
-    if (r.ok) msg.textContent = '✅ 已保存，可返回到主界面开始审核';
-    else msg.textContent = '❌ ' + (r.error || '保存失败');
+    const cfg = await api('/api/config');
+    providers = cfg.providers || [];
+    defaultProvider = cfg.defaultProvider || (providers[0] && providers[0].id) || '';
+    proxyMode = cfg.proxy_mode || 'direct';
+    proxyUrl = cfg.proxy_url || '';
+    document.querySelector('input[name="proxyMode"][value="' + proxyMode + '"]').checked = true;
+    proxyUrlEl.value = proxyUrl;
+    toggleProxyUrl();
+    renderProviders();
   } catch (e) {
-    msg.textContent = '❌ ' + e.message;
+    providerList.innerHTML = '<div class="err-banner">配置加载失败：' + e.message + '</div>';
   }
+}
+
+function toggleProxyUrl() {
+  const mode = document.querySelector('input[name="proxyMode"]:checked').value;
+  proxyUrlGroup.style.display = mode === 'proxy' ? 'block' : 'none';
+}
+proxyRadios.forEach(r => r.addEventListener('change', toggleProxyUrl));
+
+// ---- 渲染提供商卡片 ----
+function renderProviders() {
+  providerList.innerHTML = '';
+  if (!providers.length) {
+    providerList.innerHTML = '<div class="empty" style="padding:18px 0;">暂无 API 提供商，点击下方按钮新增。</div>';
+    return;
+  }
+  providers.forEach(p => {
+    const isDefault = p.id === defaultProvider;
+    const card = document.createElement('div');
+    card.className = 'provider-card' + (isDefault ? ' is-default' : '');
+    card.innerHTML = `
+      <div class="pc-head">
+        <span class="pc-name">${escapeHtml(p.name || p.id)}</span>
+        ${isDefault ? '<span class="badge">默认</span>' : ''}
+      </div>
+      <div class="pc-meta">
+        <div><span class="muted">Base URL</span> ${escapeHtml(p.baseUrl || '—')}</div>
+        <div><span class="muted">模型</span> ${escapeHtml(p.model || '—')}</div>
+        <div><span class="muted">Key</span> ${p.apiKey ? p.apiKey.slice(0, 4) + '****' + p.apiKey.slice(-4) : '—'}</div>
+      </div>
+      <div class="pc-actions">
+        ${isDefault ? '' : '<button class="btn btn-mini" data-act="default">设为默认</button>'}
+        <button class="btn btn-mini" data-act="edit">编辑</button>
+        <button class="btn btn-mini" data-act="delete" style="background:#dc2626;">删除</button>
+      </div>`;
+    card.querySelector('[data-act="default"]')?.addEventListener('click', () => setDefault(p.id));
+    card.querySelector('[data-act="edit"]').addEventListener('click', () => openEditor(p.id));
+    card.querySelector('[data-act="delete"]').addEventListener('click', () => removeProvider(p.id));
+    providerList.appendChild(card);
+  });
+}
+
+function setDefault(id) {
+  defaultProvider = id;
+  renderProviders();
+  persist().catch(e => alert('保存默认提供商失败：' + e.message));
+}
+
+function removeProvider(id) {
+  if (!confirm('确定删除该 API 提供商？')) return;
+  providers = providers.filter(p => p.id !== id);
+  if (defaultProvider === id) {
+    defaultProvider = providers.length ? providers[0].id : '';
+  }
+  renderProviders();
+  persist().catch(e => alert('删除提供商失败：' + e.message));
+}
+
+// ---- 编辑器 ----
+function openEditor(id) {
+  editingId = id || null;
+  edMsg.textContent = '';
+  edModelDropdown.style.display = 'none';
+  edModelDropdown.innerHTML = '';
+  if (editingId) {
+    const p = providers.find(x => x.id === editingId);
+    edName.value = p.name || '';
+    edBaseUrl.value = p.baseUrl || '';
+    edApiKey.value = p.apiKey || '';
+    edModel.value = p.model || '';
+  } else {
+    edName.value = '';
+    edBaseUrl.value = '';
+    edApiKey.value = '';
+    edModel.value = '';
+  }
+  editor.style.display = 'block';
+  editor.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function closeEditor() {
+  editor.style.display = 'none';
+  editingId = null;
+  edMsg.textContent = '';
+}
+
+document.getElementById('btnAdd').addEventListener('click', () => openEditor(null));
+document.getElementById('edCancel').addEventListener('click', closeEditor);
+
+document.getElementById('edToggleKey').addEventListener('click', () => {
+  edApiKey.type = edApiKey.type === 'password' ? 'text' : 'password';
 });
 
-document.getElementById('btnFetchModels').addEventListener('click', async () => {
-  modelHint.textContent = '获取中…';
-  modelDropdown.style.display = 'none';
-  modelDropdown.innerHTML = '';
+document.getElementById('edSave').addEventListener('click', async () => {
+  const name = edName.value.trim();
+  const baseUrl = edBaseUrl.value.trim();
+  const apiKey = edApiKey.value.trim();
+  const model = edModel.value.trim();
+  if (!baseUrl || !apiKey) {
+    edMsg.textContent = '⚠️ Base URL 与 API Key 必填';
+    edMsg.style.color = 'var(--danger)';
+    return;
+  }
+  if (editingId) {
+    const p = providers.find(x => x.id === editingId);
+    Object.assign(p, { name: name || p.id, baseUrl, apiKey, model });
+  } else {
+    const id = genId();
+    providers.push({ id, name: name || ('提供商 ' + (providers.length + 1)), baseUrl, apiKey, model });
+    if (!defaultProvider) defaultProvider = id;
+  }
+  edMsg.textContent = '保存中…';
+  edMsg.style.color = 'var(--success)';
   try {
-    const r = await fetch('/api/models').then(apijson);
+    await persist();
+    edMsg.textContent = '✅ 已保存并持久化';
+  } catch (e) {
+    edMsg.textContent = '⚠️ 已暂存但未保存成功：' + e.message;
+    edMsg.style.color = 'var(--danger)';
+  }
+  renderProviders();
+  closeEditor();
+});
+
+// ---- 获取模型 ----
+document.getElementById('edBtnFetch').addEventListener('click', async () => {
+  edModelHint.textContent = '获取中…';
+  edModelDropdown.style.display = 'none';
+  edModelDropdown.innerHTML = '';
+  const baseUrl = edBaseUrl.value.trim();
+  const apiKey = edApiKey.value.trim();
+  if (!baseUrl || !apiKey) {
+    edModelHint.textContent = '⚠️ 请先填写 Base URL 与 API Key';
+    return;
+  }
+  try {
+    const r = await fetch('/api/models', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ baseUrl, apiKey })
+    }).then(apijson);
     if (r.error) throw new Error(r.error);
     const models = r.models || [];
     models.forEach(m => {
       const item = document.createElement('div');
       item.textContent = m;
-      item.style.cssText = 'padding:8px 12px; cursor:pointer; font-size:13px; transition:background .12s;';
-      item.addEventListener('mouseenter', () => item.style.background = '#f0f4ff');
-      item.addEventListener('mouseleave', () => item.style.background = '');
+      item.className = 'model-item';
       item.addEventListener('click', () => {
-        modelEl.value = m;
-        modelDropdown.style.display = 'none';
+        edModel.value = m;
+        edModelDropdown.style.display = 'none';
       });
-      modelDropdown.appendChild(item);
+      edModelDropdown.appendChild(item);
     });
-    modelHint.textContent = `共 ${models.length} 个模型可用`;
-    if (models.length === 1 && !modelEl.value) {
-      modelEl.value = models[0];
-    }
+    edModelHint.textContent = `共 ${models.length} 个模型可用`;
+    if (models.length === 1 && !edModel.value) edModel.value = models[0];
   } catch (e) {
-    modelHint.textContent = '❌ ' + e.message;
+    edModelHint.textContent = '❌ ' + e.message;
   }
 });
 
-btnDropdown.addEventListener('click', (e) => {
+edBtnDropdown.addEventListener('click', (e) => {
   e.stopPropagation();
-  if (modelDropdown.children.length === 0) {
-    document.getElementById('btnFetchModels').click();
+  if (edModelDropdown.children.length === 0) {
+    document.getElementById('edBtnFetch').click();
     return;
   }
-  modelDropdown.style.display = modelDropdown.style.display === 'block' ? 'none' : 'block';
+  edModelDropdown.style.display = edModelDropdown.style.display === 'block' ? 'none' : 'block';
 });
-
-modelEl.addEventListener('focus', () => {
-  if (modelDropdown.children.length > 0) {
-    modelDropdown.style.display = 'block';
-  }
+edModel.addEventListener('focus', () => {
+  if (edModelDropdown.children.length > 0) edModelDropdown.style.display = 'block';
 });
-
 document.addEventListener('click', (e) => {
-  if (!e.target.closest('#model') && !e.target.closest('#btnDropdown') && !e.target.closest('#modelDropdown')) {
-    modelDropdown.style.display = 'none';
+  if (!e.target.closest('#edModel') && !e.target.closest('#edBtnDropdown') && !e.target.closest('#edModelDropdown')) {
+    edModelDropdown.style.display = 'none';
   }
 });
+
+// ---- 保存全部（代理设置也走这里；提供商增删改已即时保存） ----
+document.getElementById('btnSave').addEventListener('click', async () => {
+  msg.textContent = '保存中…';
+  try {
+    await persist();
+    msg.textContent = '✅ 已保存';
+  } catch (e) {
+    msg.textContent = '❌ ' + e.message;
+  }
+});
+
+load();
 </script>
 </body>
 </html>

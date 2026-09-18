@@ -45,6 +45,7 @@
   <a href="index.html">审校</a>
   <a href="review.html">审校确认</a>
   <a href="create.html" class="active">创作</a>
+  <a href="chat.html">AI 会话</a>
   <a href="config.html">API 配置</a>
 </div>
 <div class="container">
@@ -95,7 +96,9 @@
   </div>
 
   <div class="card" id="outputCard" style="display:none;">
-    <h2>生成结果 <span class="badge" id="timeBadge"></span></h2>
+    <h2>生成结果 <span class="badge" id="timeBadge"></span>
+      <button id="toggleOutputFormat" class="btn btn-mini" style="margin-left:8px; vertical-align:middle; font-size:12px;">原始/md格式</button>
+    </h2>
     <div id="outputContent" class="md-content" style="font-size:14px; background:#fafafa; padding:14px; border-radius:8px; line-height:1.8; max-height:600px; overflow-y:auto;"></div>
   </div>
 
@@ -152,6 +155,7 @@ let genStartAt = 0;
 // 流式渲染状态
 let currentMd = '';
 let rafPending = false;
+let showRawMode = false;
 
 // 无数据看门狗：连续 5 分钟未收到任何字节则中止请求。
 // 后端只要有增量到达就会不断重置计时，正常长文生成不会误伤。
@@ -187,7 +191,13 @@ function scheduleStreamRender() {
   requestAnimationFrame(() => {
     rafPending = false;
     const nearBottom = outputContent.scrollHeight - outputContent.scrollTop - outputContent.clientHeight < 120;
-    outputContent.innerHTML = renderMarkdown(currentMd);
+    if (showRawMode) {
+      outputContent.innerHTML = '<pre style="white-space:pre-wrap;word-break:break-word;font-family:inherit;font-size:13px;line-height:1.6;margin:0;background:transparent;">' + escapeHtml(currentMd) + '</pre>';
+      outputContent.className = '';
+    } else {
+      outputContent.innerHTML = renderMarkdown(currentMd);
+      outputContent.className = 'md-content';
+    }
     if (nearBottom) outputContent.scrollTop = outputContent.scrollHeight;
   });
 }
@@ -202,6 +212,27 @@ function renderMarkdown(text) {
   if (typeof marked === 'undefined') return escapeHtml(text).replace(/\n/g, '<br>');
   marked.setOptions({ breaks: true, gfm: true });
   return marked.parse(text || '');
+}
+
+function toggleOutputFormat() {
+  showRawMode = !showRawMode;
+  const btn = document.getElementById('toggleOutputFormat');
+  // 用 currentMd 重新渲染
+  if (showRawMode) {
+    outputContent.innerHTML = '<pre style="white-space:pre-wrap;word-break:break-word;font-family:inherit;font-size:13px;line-height:1.6;margin:0;background:transparent;">' + escapeHtml(currentMd) + '</pre>';
+    outputContent.className = '';
+    btn.textContent = 'MD格式';
+    btn.style.background = '#eff6ff';
+    btn.style.color = '#3b82f6';
+    btn.style.borderColor = '#bfdbfe';
+  } else {
+    outputContent.innerHTML = renderMarkdown(currentMd);
+    outputContent.className = 'md-content';
+    btn.textContent = '原始/md格式';
+    btn.style.background = '';
+    btn.style.color = '';
+    btn.style.borderColor = '';
+  }
 }
 
 function getCheckedSkills() {
@@ -393,11 +424,19 @@ async function loadHistoryResult(timeId) {
     promptInput.value = r.prompt || '';
     timeBadge.textContent = r.time || '';
     if (r.error) {
-      // 生成失败的记录：在结果卡片里直接展示失败原因
+      currentMd = '';
       outputContent.innerHTML = '<div class="err-banner">该次生成失败：' +
         escapeHtml(r.error) + '</div>';
+      outputContent.className = '';
     } else {
-      outputContent.innerHTML = renderMarkdown(r.output);
+      currentMd = r.output || '';
+      if (showRawMode) {
+        outputContent.innerHTML = '<pre style="white-space:pre-wrap;word-break:break-word;font-family:inherit;font-size:13px;line-height:1.6;margin:0;background:transparent;">' + escapeHtml(currentMd) + '</pre>';
+        outputContent.className = '';
+      } else {
+        outputContent.innerHTML = renderMarkdown(currentMd);
+        outputContent.className = 'md-content';
+      }
     }
     outputCard.style.display = 'block';
     outputCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -502,6 +541,8 @@ btnGenerate.addEventListener('click', async () => {
     releaseBusy();
   }
 });
+
+document.getElementById('toggleOutputFormat').addEventListener('click', toggleOutputFormat);
 
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape' && editModal.classList.contains('show')) closeEdit();
